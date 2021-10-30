@@ -90,15 +90,25 @@ def after_syscall(frame: lldb.SBFrame, target: lldb.SBTarget) -> bool:
     return prev_instruction.GetMnemonic(target) == "syscall"
 
 
+def get_rdi_register_value(frame: lldb.SBFrame) -> int:
+    for reg_group in frame.registers:
+        if reg_group.name == "General Purpose Registers":
+            for reg in reg_group.children:
+                if reg.name == "rdi":
+                    return reg.GetValueAsUnsigned()
+    assert False
+
+
 def detect_pending_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, int):
     if not is_last_three_frames_blocking_mutex(thread.get_thread_frames()):
         return None
+    current_frame: lldb.SBFrame
     current_frame = thread.get_thread_frames()[0]
     if not after_syscall(current_frame, target):
         return None
     mutex_lock_frame = thread.get_thread_frames()[2]
     mutex_owner = mutex_lock_frame.EvaluateExpression("(__mutex->__data).__owner").GetValueAsUnsigned()
-    mutex_addr = get_mutex_pointer(mutex_lock_frame)
+    mutex_addr = get_rdi_register_value(current_frame)
     return mutex_addr, mutex_owner
 
 
@@ -115,7 +125,7 @@ def find_deadlock(debugger: lldb.SBDebugger, command: str, result: lldb.SBComman
             # graph.add_direction(GraphState(StateType.Mutex, mutex_addr), mutex_owner)
             # graph.add_direction(GraphState(StateType.Thread, thread.GetIndexId()), mutex_addr)
             result.AppendMessage(
-                str(thread.GetIndexID()) + " is waiting for " + str(mutex_addr) + ", which owner is " + str(mutex_owner))
+                str(thread.GetIndexID()) + " is waiting for " + hex(mutex_addr) + ", which owner is " + str(mutex_owner))
     # cycle = graph.find_cycle()
     # if cycle:
     #     for i in cycle:
