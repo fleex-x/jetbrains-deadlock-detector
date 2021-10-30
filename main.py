@@ -1,12 +1,60 @@
-#!/usr/bin/env python
-
 # command script import main.py
-from typing import Tuple
-
 import lldb
+from enum import Enum
 
 
-class ThreadGraph
+class StateType(Enum):
+    Mutex = 1
+    Thread = 2
+
+
+class GraphState:
+    def __init__(self, state_type: StateType, state_num: int):
+        self.state_type = state_type
+        self.state_num = state_num
+
+
+class ThreadGraph:
+
+    def __init__(self):
+        self.mutex_owner = dict()
+        self.thread_locked_by = dict()
+        self.not_leaves = set()
+
+    def add_direction(self, from_state: GraphState, to_state: int) -> None:
+        if from_state.state_type == StateType.Mutex:
+            self.not_leaves.add(from_state.state_type)
+            self.mutex_owner[from_state.state_num].direction = to_state
+        else:
+            self.thread_locked_by[from_state.state_num] = to_state
+
+    def dfs(self, state: GraphState, current_path: [GraphState], used: dict) -> bool:
+        if used[state]:
+            return True
+        if state.state_type == StateType.Mutex:
+            current_path.append(state)
+            if self.dfs(GraphState(StateType.Thread, self.mutex_owner[state.state_type]), current_path, used):
+                return True
+            else:
+                current_path.pop()
+                return False
+        elif state.state_type == StateType.Thread:
+            current_path.append(state)
+            if self.dfs(GraphState(StateType.Mutex, self.thread_locked_by[state.state_type]), current_path, used):
+                return True
+            else:
+                current_path.pop()
+                return False
+        assert False
+
+    def find_cycle(self) -> [GraphState]:
+        for (key, _) in self.mutex_owner:
+            if not (key in self.not_leaves):
+                current_path = []
+                used = dict()
+                if self.dfs(GraphState(StateType.Mutex, key), current_path, used):
+                    return current_path
+        return None
 
 
 def get_mutex_pointer(frame: lldb.SBFrame) -> int:
@@ -49,20 +97,32 @@ def detect_pending_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, 
     if not after_syscall(current_frame, target):
         return None
     mutex_lock_frame = thread.get_thread_frames()[2]
-    mutex_owner = mutex_lock_frame.EvaluateExpression("(__mutex->__data).__owner").GetValueAsUnsigned();
+    mutex_owner = mutex_lock_frame.EvaluateExpression("(__mutex->__data).__owner").GetValueAsUnsigned()
     mutex_addr = get_mutex_pointer(mutex_lock_frame)
     return mutex_addr, mutex_owner
 
 
-def find_deadlock(debugger: lldb.SBDebugger, command: str, result: lldb.SBCommandReturnObject, internal_dict: dict) -> None:
+def find_deadlock(debugger: lldb.SBDebugger, command: str, result: lldb.SBCommandReturnObject,
+                  internal_dict: dict) -> None:
     target = debugger.GetSelectedTarget()
     process = target.GetProcess()
+    graph = ThreadGraph()
     for thread in process:
         mutex_info = detect_pending_mutex(thread, target)
         if mutex_info:
             mutex_addr, mutex_owner = mutex_info
+            mutex_owner = process.GetThreadByID(mutex_owner).GetIndexID()
+            # graph.add_direction(GraphState(StateType.Mutex, mutex_addr), mutex_owner)
+            # graph.add_direction(GraphState(StateType.Thread, thread.GetIndexId()), mutex_addr)
             result.AppendMessage(
-                str(thread.id) + " is waiting for " + str(mutex_addr) + ", which owner is " + str(mutex_owner))
+                str(thread.GetIndexID()) + " is waiting for " + str(mutex_addr) + ", which owner is " + str(mutex_owner))
+    # cycle = graph.find_cycle()
+    # if cycle:
+    #     for i in cycle:
+    #         if i.state_type == StateType.Mutex:
+    #             result.AppendMessage("mutex " + str(i.state_num))
+    #         else:
+    #             result.AppendMessage("thread " + str(i.state_num))
 
 
 def __lldb_init_module(debugger: lldb.SBDebugger, internal_dict: dict):
