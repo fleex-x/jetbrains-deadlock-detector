@@ -108,8 +108,8 @@ def detect_pending_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, 
         return None
     mutex_addr = get_rdi_register_value(current_frame)
     error = lldb.SBError()
-    int_size = 4
-    unsigned_int_size = 4
+    int_size = current_frame.EvaluateExpression("sizeof(int)").GetValueAsUnsigned()
+    unsigned_int_size = current_frame.EvaluateExpression("sizeof(unsigned int)").GetValueAsUnsigned()
     mutex_owner = target.GetProcess().ReadUnsignedFromMemory(mutex_addr + int_size + unsigned_int_size, int_size, error)
     return mutex_addr, mutex_owner
 
