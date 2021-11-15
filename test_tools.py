@@ -19,7 +19,7 @@ def set_breakpoints(path_to_file: str, breakpoint_name: str, target: lldb.SBTarg
 
 
 class MySetUpTestCase(unittest.TestCase):
-    def mySetUp(self, breakpoints: [int]):
+    def mySetUp(self, breakpoints: [str]):
         os.system("clang++ -std=c++17 -pthread -g -o run-test.out main.cpp")
         self.exe = os.path.join(os.getcwd(), "run-test.out")
         self.translation_unit = os.path.join(os.getcwd(), "main.cpp")
@@ -33,7 +33,7 @@ class MySetUpTestCase(unittest.TestCase):
         self.target = self.debugger.CreateTarget(self.exe)
         self.assertTrue(self.target.IsValid())
 
-        bp_list = [self.target.BreakpointCreateByLocation(self.translation_unit, line) for line in breakpoints]
+        bp_list = [[self.target.BreakpointCreateByLocation(self.translation_unit, line) for line in get_breakpoint_lines(self.translation_unit, breakpoint_)] for breakpoint_ in breakpoints]
 
 
 
