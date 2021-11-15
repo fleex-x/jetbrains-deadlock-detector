@@ -1,6 +1,7 @@
-# command script import main.py
 import lldb
 from enum import Enum
+
+# command script import deadlock_detector.py
 
 
 class UsedState(Enum):
@@ -64,21 +65,13 @@ def disassemble_into_mnemonics(frame: lldb.SBFrame, target: lldb.SBTarget) -> [s
     return [instruction.GetMnemonic(target) for instruction in frame.GetFunction().GetInstructions(target)]
 
 
-# def __lll_lock_wait_mnemonics():
-#     return ["endbr64", "movl", "movl", "cmpl", "je", "movl", "xchgl", "testl", "je", "nop", "movl", "xorl", "movl", "movl", "xorb", "syscall", "jmp", "nopw", "retq"]
-#
-#
-# def __GI___pthread_mutex_lock_mnemonics():
-#     return ["endbr64", "movl", "movl", "andl", "nop", "andl", "jne", "pushq", "subq", "testl", "jne", "movl", "testl", "jne", "xorl", "movl", "lock", "cmpxchgl", "jne", "movl", "testl", "jne", "movl", "movl", "addl", "nop", "xorl", "addq", "popq", "retq", "nopl", "movl", "testb", "je", "testb", "je", "jmp", "nop", "orb", "movl", "movl", "addq", "leaq", "popq", "andl", "jmp", "nopl", "jmp", "nopl", "cmpl", "je", "movl", "andl", "cmpl", "jne", "movl", "cmpl", "jne", "movl", "cmpl", "je", "addl", "movl", "xorl", "jmp", "nop", "movl", "movq", "andl", "callq", "movq", "jmp", "lock", "cmpxchgl", "jne", "movl", "testl", "jne", "movl", "jmp", "movl", "andl", "cmpl", "jne", "cmpl", "je", "movl", "lock", "cmpxchgl", "jne", "cmpl", "je", "leaq", "movl", "leaq", "leaq", "callq", "movl", "movq", "andl", "callq", "movq", "jmp", "movl", "jmp", "leaq", "movl", "leaq", "leaq", "callq", "movl", "movl", "andl", "cmpl", "jne", "cmpl", "jne", "movl", "jmp", "leaq", "movl", "leaq", "leaq", "callq", "movswl", "movswl", "movl", "leal", "cmpl", "cmovlel", "xorl", "xorl", "movl", "addl", "cmpl", "jge", "pause", "movl", "lock", "cmpxchgl", "jne", "movswl", "movl", "subl", "movl", "movl", "cltd", "idivl", "addl", "movw", "jmp", "leaq", "movl", "leaq", "leaq", "callq", "xorl", "movl", "lock", "cmpxchgl", "je", "movl", "movq", "andl", "callq", "movq", "jmp"]
-
-
 def __lll_lock_wait_binary_instructions_template() -> [int]:
     return [0xf3, 0x0f, 0x1e, 0xfa,
             0x8b, 0x07,
             0x41, 0x89, 0xf0,
             0x83, 0xf8, 0x02,
             0x74, -1,
-            0xb8, 0x02, 0x00, 0x00,  0x00,
+            0xb8, 0x02, 0x00, 0x00, 0x00,
             0x87, 0x07,
             0x85, 0xc0,
             0x74, -1,
@@ -94,6 +87,10 @@ def __lll_lock_wait_binary_instructions_template() -> [int]:
             0xc3]
 
 
+def __gthread_mutex_lock_instructions_template() -> [int]:
+    return []
+
+
 def is_matched_by_template(to_check: [int], template: [int]) -> bool:
     if len(to_check) != len(template):
         return False
@@ -101,11 +98,6 @@ def is_matched_by_template(to_check: [int], template: [int]) -> bool:
         if template[i] != -1 and to_check[i] != template[i]:
             return False
     return True
-
-# def __gthread_mutex_lock_mnemonics():
-#     return ["pushq", "movq", "subq", "movq", "callq", "testl", "setne", "testb", "je", "movq", "movq", "callq", "jmp", "movl", "leave", "retq"]
-
-# ['pushq', 'movq', 'subq', 'movq', 'callq', 'cmpl', 'je', 'movq', 'callq', 'movl', 'jmp', 'movl', 'movl', 'addq', 'popq', 'retq']
 
 
 def get_bytes_from_data(data: lldb.SBData) -> [int]:
@@ -131,7 +123,8 @@ def disassemble_into_bytes(frame: lldb.SBFrame, target: lldb.SBTarget) -> [int]:
 def is_last_two_frames_blocking_mutex(frames: [lldb.SBFrame], target: lldb.SBTarget) -> bool:
     if len(frames) < 2:
         return False
-    return is_matched_by_template(disassemble_into_bytes(frames[0], target), __lll_lock_wait_binary_instructions_template())
+    return is_matched_by_template(disassemble_into_bytes(frames[0], target),
+                                  __lll_lock_wait_binary_instructions_template())
 
 
 def get_prev_instruction(frame: lldb.SBFrame, instruction_addr: int, target: lldb.SBTarget) -> lldb.SBInstruction:
@@ -175,8 +168,7 @@ def detect_pending_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, 
     return mutex_addr, mutex_owner
 
 
-def find_deadlock(debugger: lldb.SBDebugger, command: str, result: lldb.SBCommandReturnObject,
-                  internal_dict: dict) -> None:
+def find_deadlock(debugger: lldb.SBDebugger) -> (bool, [(int, int)]):
     target: lldb.SBTarget
     target = debugger.GetSelectedTarget()
 
@@ -195,11 +187,19 @@ def find_deadlock(debugger: lldb.SBDebugger, command: str, result: lldb.SBComman
             g.add_locking_mutex_for_thread(thread.GetIndexID(), mutex_addr)
     cycle: [(int, int)]
     cycle = []
-    if g.has_deadlock(cycle):
+    has_deadlock = g.has_deadlock(cycle)
+    return has_deadlock, cycle
+
+
+def find_deadlock_console(debugger: lldb.SBDebugger, command: str, result: lldb.SBCommandReturnObject,
+                          internal_dict: dict) -> None:
+    has_deadlock, cycle = find_deadlock(debugger)
+    if has_deadlock:
         result.AppendMessage("deadlock detected:")
         for i in range(len(cycle)):
             result.AppendMessage(
-                str(str(cycle[i][0])) + " is waiting for " + hex(cycle[i][1]) + ", which owner is " + str(cycle[(i + 1) % len(cycle)][0]))
+                str(str(cycle[i][0])) + " is waiting for " + hex(cycle[i][1]) + ", which owner is " + str(
+                    cycle[(i + 1) % len(cycle)][0]))
     else:
         result.AppendMessage("there are no deadlocks in the process")
 
@@ -218,6 +218,6 @@ def dis(debugger: lldb.SBDebugger, command: str, result: lldb.SBCommandReturnObj
 
 
 def __lldb_init_module(debugger: lldb.SBDebugger, internal_dict: dict):
-    debugger.HandleCommand("command script add -f " + __name__ + ".find_deadlock find_deadlock")
+    debugger.HandleCommand("command script add -f " + __name__ + ".find_deadlock_console find_deadlock")
     debugger.HandleCommand("command script add -f " + __name__ + ".dis dis")
-    debugger.HandleCommand("find_deadlock")
+    # debugger.HandleCommand("find_deadlock")
