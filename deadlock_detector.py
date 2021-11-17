@@ -1,10 +1,6 @@
 import lldb
 from enum import Enum
 
-
-# command script import deadlock_detector.py
-
-
 class UsedState(Enum):
     StillInState = 1
     AlreadyGone = 2
@@ -84,23 +80,6 @@ class TemplateChecker:
                 if template[i] != -1 and to_check[i] != template[i]:
                     return False
         return True
-
-    # @staticmethod
-    # def diff_with_template(to_check_lst: [[int]], template_lst: [[int]], result: lldb.SBCommandReturnObject):
-    #     if len(to_check_lst) > len(template_lst):
-    #         result.AppendMessage("template is shorter: " + "")
-    #     if len(to_check_lst) < len(template_lst):
-    #         result.AppendMessage("template is longer")
-    #     mn_len = min(len(to_check_lst), len(template_lst))
-    #     for instruction_num in range(mn):
-    #         to_check = to_check_lst[instruction_num]
-    #         template = template_lst[instruction_num]
-    #         if len(to_check) != len(template):
-    #             return False
-    #         for i in range(len(to_check)):
-    #             if template[i] != -1 and to_check[i] != template[i]:
-    #                 return False
-    #     return True
 
 
 __lll_lock_wait_binary_instructions_template = TemplateChecker.load_template("res/__lll_lock_wait_binary_instructions_template.txt")
@@ -212,20 +191,7 @@ def find_deadlock_console(debugger: lldb.SBDebugger, command: str, result: lldb.
         result.AppendMessage("there are no deadlocks in the process")
 
 
-def dis(debugger: lldb.SBDebugger, command: str, result: lldb.SBCommandReturnObject, internal_dict: dict) -> None:
-    target: lldb.SBTarget
-    target = debugger.GetSelectedTarget()
-
-    process: lldb.SBProcess
-    process = target.GetProcess()
-    thread: lldb.SBThread
-    thread = process.GetSelectedThread()
-    if len(thread.get_thread_frames()) >= 3:
-        frame = thread.GetSelectedFrame()
-        result.AppendMessage(str(disassemble_into_bytes(frame, target)))
-
-
 def __lldb_init_module(debugger: lldb.SBDebugger, internal_dict: dict):
     debugger.HandleCommand("command script add -f " + __name__ + ".find_deadlock_console find_deadlock")
-    debugger.HandleCommand("command script add -f " + __name__ + ".dis dis")
-    # debugger.HandleCommand("find_deadlock")
+
+# command script import deadlock_detector.py
