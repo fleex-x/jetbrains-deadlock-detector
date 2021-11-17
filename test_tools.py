@@ -1,6 +1,8 @@
 import lldb
 import unittest
 import os
+import functools
+import operator
 
 
 def get_breakpoint_lines(path_to_file: str, breakpoint_name: str) -> [int]:
@@ -19,21 +21,21 @@ def set_breakpoints(path_to_file: str, breakpoint_name: str, target: lldb.SBTarg
 
 
 class MySetUpTestCase(unittest.TestCase):
-    def mySetUp(self, breakpoints: [str]):
-        os.system("clang++ -std=c++17 -pthread -g -o run-test.out main.cpp")
+    def mySetUp(self, breakpoints: [str], compiler: str):
+        os.system(compiler + " -std=c++17 -pthread -g -o run-test.out main.cpp")
         self.exe = os.path.join(os.getcwd(), "run-test.out")
         self.translation_unit = os.path.join(os.getcwd(), "main.cpp")
 
         self.debugger: lldb.SBDebugger
         self.debugger = lldb.SBDebugger.Create()
         self.debugger.SetAsync(False)
-        self.assertTrue(self.debugger.IsValid())
+        self.assertTrue(self.debugger and self.debugger.IsValid())
 
         self.target: lldb.SBTarget
         self.target = self.debugger.CreateTarget(self.exe)
-        self.assertTrue(self.target.IsValid())
+        self.assertTrue(self.target and self.target.IsValid())
 
-        bp_list = [[self.target.BreakpointCreateByLocation(self.translation_unit, line) for line in get_breakpoint_lines(self.translation_unit, breakpoint_)] for breakpoint_ in breakpoints]
+        self.breakpoints = functools.reduce(operator.add, [[self.target.BreakpointCreateByLocation(self.translation_unit, line) for line in get_breakpoint_lines(self.translation_unit, breakpoint_)] for breakpoint_ in breakpoints], [])
 
 
 

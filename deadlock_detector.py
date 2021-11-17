@@ -177,8 +177,9 @@ def find_deadlock(debugger: lldb.SBDebugger) -> (bool, [(int, int)]):
 
     g: ThreadGraph
     g = ThreadGraph()
-
+    print(process.GetNumThreads())
     for thread in process:
+        print([frame.name for frame in thread.get_thread_frames()])
         mutex_info = detect_pending_mutex(thread, target)
         if mutex_info:
             mutex_addr, mutex_owner = mutex_info
