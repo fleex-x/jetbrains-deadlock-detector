@@ -1,6 +1,7 @@
 import lldb
 from enum import Enum
 
+
 # command script import deadlock_detector.py
 
 
@@ -43,8 +44,8 @@ class ThreadGraph:
             if found_cycle:
                 right_cycle = []
                 started_cycle = False
-                for thread, mutex in cycle:
-                    if thread == first_in_cycle:
+                for cyc_thread, mutex in cycle:
+                    if cyc_thread == first_in_cycle:
                         started_cycle = True
                     if started_cycle:
                         right_cycle.append((thread, mutex))
@@ -54,50 +55,56 @@ class ThreadGraph:
         return False
 
 
-def get_mutex_pointer(frame: lldb.SBFrame) -> int:
-    for var in frame.args:
-        if var.name == "__mutex":
-            return var.GetValueAsUnsigned()
-    return None
+class TemplateChecker:
+    @staticmethod
+    def load_template(path_to_file: str) -> [[int]]:
+        res = []
 
+        def str_to_int(my_str: str):
+            if my_str == "-1":
+                return -1
+            else:
+                return int("0x" + my_str, base=16)
 
-def disassemble_into_mnemonics(frame: lldb.SBFrame, target: lldb.SBTarget) -> [str]:
-    return [instruction.GetMnemonic(target) for instruction in frame.GetFunction().GetInstructions(target)]
+        with open(path_to_file, "r") as template_source:
+            for line in template_source.readlines():
+                res.append(list(map(str_to_int, line.rstrip().split(" "))))
+        return res
 
-
-def __lll_lock_wait_binary_instructions_template() -> [int]:
-    return [0xf3, 0x0f, 0x1e, 0xfa,
-            0x8b, 0x07,
-            0x41, 0x89, 0xf0,
-            0x83, 0xf8, 0x02,
-            0x74, -1,
-            0xb8, 0x02, 0x00, 0x00, 0x00,
-            0x87, 0x07,
-            0x85, 0xc0,
-            0x74, -1,
-            0x90,
-            0x44, 0x89, 0xc6,
-            0x45, 0x31, 0xd2,
-            0xba, 0x02, 0x00, 0x00, 0x00,
-            0xb8, 0xca, 0x00, 0x00, 0x00,
-            0x40, 0x80, 0xf6, 0x80,
-            0x0f, 0x05,
-            0xeb, -1,
-            0x66, 0x0f, 0x1f, 0x44, 0x00, 0x00,
-            0xc3]
-
-
-def __gthread_mutex_lock_instructions_template() -> [int]:
-    return []
-
-
-def is_matched_by_template(to_check: [int], template: [int]) -> bool:
-    if len(to_check) != len(template):
-        return False
-    for i in range(len(to_check)):
-        if template[i] != -1 and to_check[i] != template[i]:
+    @staticmethod
+    def is_matched_by_template(to_check_lst: [[int]], template_lst: [[int]]) -> bool:
+        if len(to_check_lst) != len(template_lst):
             return False
-    return True
+        for instruction_num in range(len(to_check_lst)):
+            to_check = to_check_lst[instruction_num]
+            template = template_lst[instruction_num]
+            if len(to_check) != len(template):
+                return False
+            for i in range(len(to_check)):
+                if template[i] != -1 and to_check[i] != template[i]:
+                    return False
+        return True
+
+    # @staticmethod
+    # def diff_with_template(to_check_lst: [[int]], template_lst: [[int]], result: lldb.SBCommandReturnObject):
+    #     if len(to_check_lst) > len(template_lst):
+    #         result.AppendMessage("template is shorter: " + "")
+    #     if len(to_check_lst) < len(template_lst):
+    #         result.AppendMessage("template is longer")
+    #     mn_len = min(len(to_check_lst), len(template_lst))
+    #     for instruction_num in range(mn):
+    #         to_check = to_check_lst[instruction_num]
+    #         template = template_lst[instruction_num]
+    #         if len(to_check) != len(template):
+    #             return False
+    #         for i in range(len(to_check)):
+    #             if template[i] != -1 and to_check[i] != template[i]:
+    #                 return False
+    #     return True
+
+
+__lll_lock_wait_binary_instructions_template = TemplateChecker.load_template("res/__lll_lock_wait_binary_instructions_template.txt")
+__GI___pthread_mutex_lock_instructions_template = TemplateChecker.load_template("res/__GI___pthread_mutex_lock_instructions_template.txt")
 
 
 def get_bytes_from_data(data: lldb.SBData) -> [int]:
@@ -108,6 +115,8 @@ def get_bytes_from_data(data: lldb.SBData) -> [int]:
         error: lldb.SBError
         error = lldb.SBError()
         res.append((data.GetUnsignedInt8(error, i)))
+        if error.Fail():
+            print(error.GetCString())
     return res
 
 
@@ -116,15 +125,15 @@ def disassemble_into_bytes(frame: lldb.SBFrame, target: lldb.SBTarget) -> [int]:
     res = []
     for instruction in frame.GetFunction().GetInstructions(target):
         instruction: lldb.SBInstruction
-        res.extend(get_bytes_from_data(instruction.GetData(target)))
+        res.append(get_bytes_from_data(instruction.GetData(target)))
     return res
 
 
 def is_last_two_frames_blocking_mutex(frames: [lldb.SBFrame], target: lldb.SBTarget) -> bool:
     if len(frames) < 2:
         return False
-    return is_matched_by_template(disassemble_into_bytes(frames[0], target),
-                                  __lll_lock_wait_binary_instructions_template())
+    return (TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[0], target), __lll_lock_wait_binary_instructions_template) and
+            TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[1], target), __GI___pthread_mutex_lock_instructions_template))
 
 
 def get_prev_instruction(frame: lldb.SBFrame, instruction_addr: int, target: lldb.SBTarget) -> lldb.SBInstruction:
@@ -177,9 +186,7 @@ def find_deadlock(debugger: lldb.SBDebugger) -> (bool, [(int, int)]):
 
     g: ThreadGraph
     g = ThreadGraph()
-    print(process.GetNumThreads())
     for thread in process:
-        print([frame.name for frame in thread.get_thread_frames()])
         mutex_info = detect_pending_mutex(thread, target)
         if mutex_info:
             mutex_addr, mutex_owner = mutex_info
