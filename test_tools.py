@@ -3,18 +3,16 @@ import unittest
 import os
 import functools
 import operator
+import deadlock_detector
 
 
 def get_breakpoint_lines(path_to_file: str, breakpoint_name: str) -> [int]:
-    # print(path_to_file)
-    # print(breakpoint_name)
     res = []
     with open(path_to_file, "r") as source_code:
         current_line = 1
         for line in source_code.readlines():
             if breakpoint_name in line:
                 res.append(current_line)
-                # print(current_line)
             current_line += 1
     if len(res) == 0:
         print("Warning: no breakpoints with name \"" + breakpoint_name + "\" in file " + path_to_file)
@@ -25,13 +23,29 @@ def set_breakpoints(path_to_file: str, breakpoint_name: str, target: lldb.SBTarg
     return [target.BreakpointCreateByLocation(path_to_file, line) for line in get_breakpoint_lines(path_to_file, breakpoint_name)]
 
 
+class GraphTesting:
+    @staticmethod
+    def shift_cycle(cycle: [(int, deadlock_detector.ThreadEdge)], first_node: int) -> [(int, deadlock_detector.ThreadEdge)]:
+        for i, cycle_elem in enumerate(cycle):
+            if cycle_elem[0] == first_node:
+                return cycle[i:] + cycle[:i]
+        assert False
+
+    @staticmethod
+    def cycle_eq(cycle1: [(int, deadlock_detector.ThreadEdge)], cycle2: [(int, deadlock_detector.ThreadEdge)]):
+        if len(cycle1) == 0 and len(cycle2) == 0:
+            return True
+        print()
+        if len(cycle1) != len(cycle2):
+            return False
+        return cycle1 == GraphTesting.shift_cycle(cycle2, cycle1[0][0])
+
+
 class MySetUpTestCase(unittest.TestCase):
     process: lldb.SBProcess
     target: lldb.SBTarget
     debugger: lldb.SBDebugger
     breakpoints: [lldb.SBBreakpoint]
-    # syscall_address = 0x7ffff7c4110e
-    # pthread_mutex_return_address = 0x7ffff7c3923a
 
     def mySetUp(self, breakpoints: [str], compiler: str):
         os.system(compiler + " -std=c++17 -pthread -g -o run-test.out main.cpp")
@@ -50,6 +64,9 @@ class MySetUpTestCase(unittest.TestCase):
         self.breakpoints = functools.reduce(operator.add, [[self.target.BreakpointCreateByLocation(self.translation_unit, line) for line in get_breakpoint_lines(self.translation_unit, breakpoint_)] for breakpoint_ in breakpoints], [])
         self.process: lldb.SBProcess
         self.process = lldb.SBProcess()
+
+    def add_breakpoint_by_name(self, breakpoint_name: str):
+        self.breakpoints.extend([self.target.BreakpointCreateByLocation(self.translation_unit, line) for line in get_breakpoint_lines(self.translation_unit, breakpoint_name)])
 
     def launch_process(self) -> lldb.SBError:
         self.listener = lldb.SBListener("my listener")

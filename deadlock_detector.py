@@ -109,10 +109,6 @@ __GI___pthread_mutex_lock_instructions_template = TemplateChecker.load_template(
     global_path + "res/__GI___pthread_mutex_lock_instructions_template.txt")
 
 
-# __lll_lock_wait_binary_instructions_template = TemplateChecker.load_template("res/__lll_lock_wait_binary_instructions_template.txt")
-# __GI___pthread_mutex_lock_instructions_template = TemplateChecker.load_template("res/__GI___pthread_mutex_lock_instructions_template.txt")
-
-
 def get_bytes_from_data(data: lldb.SBData) -> [int]:
     size = data.GetByteSize()
     res: list

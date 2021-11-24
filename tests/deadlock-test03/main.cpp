@@ -48,7 +48,7 @@ int main() {
 	std::thread t7([&]() {          
 		std::unique_lock<std::mutex> l1(m7); 
 		no_opearation(); //thread started working
-		std::unique_lock<std::mutex> l2(m1);
+		std::unique_lock<std::mutex> l2(m5);
 	});
 	t1.join();
 	t2.join();
