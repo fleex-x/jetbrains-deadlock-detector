@@ -22,9 +22,8 @@ public:
 };
 }  // namespace
 
-int nop() {
+void no_operation() {
 	int x = 0;
-	return x;
 }
 
 int main() {
@@ -73,14 +72,13 @@ int main() {
 		latch.arrive_and_wait();
 		for (int i = 0; i < N; ++i) {
 			std::unique_lock<std::mutex> l1(m5); 
-			//breakpoint
-			nop();
+			no_operation();//breakpoint
 		}
 
 	});
 
 	latch.arrive_and_wait();
-	for (int i = 0; i < 8; ++i) {
+	for (int i = 0; i < 30; ++i) {
 		//breakpoint
 		std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(20));
 	}

@@ -9,9 +9,8 @@ class TestNoDeadlocksClang(test_tools.MySetUpTestCase):
         self.mySetUp(["breakpoint"], "clang++")
 
     def test_run(self) -> None:
-        process: lldb.SBProcess
-        process = self.target.LaunchSimple(None, None, os.getcwd())
-        while process.Continue().Success():
+        error = self.launch_process()
+        while self.process.Continue().Success():
             self.assertFalse(deadlock_detector.find_deadlock(self.debugger)[0])
         lldb.SBDebugger.Destroy(self.debugger)
 
@@ -21,8 +20,7 @@ class TestNoDeadlocksGcc(test_tools.MySetUpTestCase):
         self.mySetUp(["breakpoint"], "g++")
 
     def test_run(self) -> None:
-        process: lldb.SBProcess
-        process = self.target.LaunchSimple(None, None, os.getcwd())
-        while process.Continue().Success():
+        error = self.launch_process()
+        while self.process.Continue().Success():
             self.assertFalse(deadlock_detector.find_deadlock(self.debugger)[0])
         lldb.SBDebugger.Destroy(self.debugger)
