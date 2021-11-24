@@ -1,54 +1,73 @@
 import lldb
 from enum import Enum
+import os
+
 
 class UsedState(Enum):
     StillInState = 1
     AlreadyGone = 2
 
 
+class ThreadEdge:
+    def __init__(self, mutex: int, thread_mutex_owner: int):
+        self.mutex = mutex
+        self.thread_mutex_owner = thread_mutex_owner
+
+    def __str__(self):
+        return "(" + hex(self.mutex) + ", " + str(self.thread_mutex_owner) + ")"
+
+    def __eq__(self, other):
+        return self.mutex == other.mutex and self.thread_mutex_owner == other.thread_mutex_owner
+
+
+class BoolRef:
+    def __init__(self, val: bool):
+        self.val = val
+
+
 class ThreadGraph:
+    thread_graph: dict
+
     def __init__(self):
-        self.mutex_owner = dict()
-        self.thread_locking_by = dict()
+        self.thread_graph = dict()
 
-    def add_owner_for_mutex(self, mutex_addr: int, owner: int):
-        self.mutex_owner[mutex_addr] = owner
+    def add_edge(self, thread_locked_by_mutex: int, edge: ThreadEdge):
+        if thread_locked_by_mutex in self.thread_graph:
+            self.thread_graph[thread_locked_by_mutex].append(edge)
+        else:
+            self.thread_graph[thread_locked_by_mutex] = [edge]
 
-    def add_locking_mutex_for_thread(self, thread: int, locking_mutex: int):
-        self.thread_locking_by[thread] = locking_mutex
+    def dfs(self, current_thread: int, used_states: dict) -> (bool, BoolRef, int, [(int, ThreadEdge)]):
+        if not (current_thread in self.thread_graph):
+            return False, BoolRef(False), 0, []
 
-    def has_cycle(self, current_thread: int, used: dict, path: [(int, int)]) -> (bool, int):
-        if current_thread in used:
-            return used[current_thread] == UsedState.StillInState, current_thread
-        used[current_thread] = UsedState.StillInState
-        if (current_thread in self.thread_locking_by) and (self.thread_locking_by[current_thread] in self.mutex_owner):
-            next_thread: int
-            next_thread = self.mutex_owner[self.thread_locking_by[current_thread]]
-            path.append((current_thread, self.thread_locking_by[current_thread]))
-            found_cycle, first_in_cycle = self.has_cycle(next_thread, used, path)
-            if found_cycle:
-                return found_cycle, first_in_cycle
-            path.pop()
-        used[current_thread] = UsedState.AlreadyGone
-        return False, -1
+        if current_thread in used_states:
+            return used_states[current_thread] == UsedState.StillInState, BoolRef(False), current_thread, []
 
-    def has_deadlock(self, cycle: [(int, int)]) -> bool:
-        used = dict()
+        used_states[current_thread] = UsedState.StillInState
 
-        for thread in self.thread_locking_by.keys():
-            found_cycle, first_in_cycle = self.has_cycle(thread, used, cycle)
-            if found_cycle:
-                right_cycle = []
-                started_cycle = False
-                for cyc_thread, mutex in cycle:
-                    if cyc_thread == first_in_cycle:
-                        started_cycle = True
-                    if started_cycle:
-                        right_cycle.append((thread, mutex))
-                cycle.clear()
-                cycle.extend(right_cycle)
-                return True
-        return False
+        for edge in self.thread_graph[current_thread]:
+            edge: ThreadEdge
+            next_thread = edge.thread_mutex_owner
+            was_cycle, collected_all_cycle, first_node_in_cycle, cycle = self.dfs(next_thread, used_states)
+            if was_cycle:
+                if not collected_all_cycle.val:
+                    cycle.append((current_thread, edge))
+                if current_thread == first_node_in_cycle:
+                    collected_all_cycle.val = True
+                return was_cycle, collected_all_cycle, first_node_in_cycle, cycle
+
+        used_states[current_thread] = UsedState.AlreadyGone
+        return False, BoolRef(False), 0, []
+
+    def find_cycle(self) -> (bool, [(int, ThreadEdge)]):
+        used_states = dict()
+        for thread in self.thread_graph.keys():
+            if not (thread in used_states):
+                was_cycle, _, _, cycle = self.dfs(thread, used_states)
+                if was_cycle:
+                    return was_cycle, list(reversed(cycle))
+        return False, []
 
 
 class TemplateChecker:
@@ -82,8 +101,16 @@ class TemplateChecker:
         return True
 
 
-__lll_lock_wait_binary_instructions_template = TemplateChecker.load_template("res/__lll_lock_wait_binary_instructions_template.txt")
-__GI___pthread_mutex_lock_instructions_template = TemplateChecker.load_template("res/__GI___pthread_mutex_lock_instructions_template.txt")
+dir_name = "deadlock_detector_project"
+global_path = os.getcwd()[0:os.getcwd().find(dir_name)] + dir_name + "/src/"
+__lll_lock_wait_binary_instructions_template = TemplateChecker.load_template(
+    global_path + "res/__lll_lock_wait_binary_instructions_template.txt")
+__GI___pthread_mutex_lock_instructions_template = TemplateChecker.load_template(
+    global_path + "res/__GI___pthread_mutex_lock_instructions_template.txt")
+
+
+# __lll_lock_wait_binary_instructions_template = TemplateChecker.load_template("res/__lll_lock_wait_binary_instructions_template.txt")
+# __GI___pthread_mutex_lock_instructions_template = TemplateChecker.load_template("res/__GI___pthread_mutex_lock_instructions_template.txt")
 
 
 def get_bytes_from_data(data: lldb.SBData) -> [int]:
@@ -111,8 +138,10 @@ def disassemble_into_bytes(frame: lldb.SBFrame, target: lldb.SBTarget) -> [int]:
 def is_last_two_frames_blocking_mutex(frames: [lldb.SBFrame], target: lldb.SBTarget) -> bool:
     if len(frames) < 2:
         return False
-    return (TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[0], target), __lll_lock_wait_binary_instructions_template) and
-            TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[1], target), __GI___pthread_mutex_lock_instructions_template))
+    return (TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[0], target),
+                                                   __lll_lock_wait_binary_instructions_template) and
+            TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[1], target),
+                                                   __GI___pthread_mutex_lock_instructions_template))
 
 
 def get_prev_instruction(frame: lldb.SBFrame, instruction_addr: int, target: lldb.SBTarget) -> lldb.SBInstruction:
@@ -166,16 +195,13 @@ def find_deadlock(debugger: lldb.SBDebugger) -> (bool, [(int, int)]):
     g: ThreadGraph
     g = ThreadGraph()
     for thread in process:
+        thread: lldb.SBThread
         mutex_info = detect_pending_mutex(thread, target)
         if mutex_info:
             mutex_addr, mutex_owner = mutex_info
             mutex_owner = process.GetThreadByID(mutex_owner).GetIndexID()
-            g.add_owner_for_mutex(mutex_addr, mutex_owner)
-            g.add_locking_mutex_for_thread(thread.GetIndexID(), mutex_addr)
-    cycle: [(int, int)]
-    cycle = []
-    has_deadlock = g.has_deadlock(cycle)
-    return has_deadlock, cycle
+            g.add_edge(thread.GetIndexID(), ThreadEdge(mutex_addr, mutex_owner))
+    return g.find_cycle()
 
 
 def find_deadlock_console(debugger: lldb.SBDebugger, command: str, result: lldb.SBCommandReturnObject,
@@ -183,12 +209,25 @@ def find_deadlock_console(debugger: lldb.SBDebugger, command: str, result: lldb.
     has_deadlock, cycle = find_deadlock(debugger)
     if has_deadlock:
         result.AppendMessage("deadlock detected:")
-        for i in range(len(cycle)):
-            result.AppendMessage(
-                str(str(cycle[i][0])) + " is waiting for " + hex(cycle[i][1]) + ", which owner is " + str(
-                    cycle[(i + 1) % len(cycle)][0]))
+        for node, edge in cycle:
+            result.AppendMessage("thread " + str(node) + " is waiting for mutex " + hex(edge.mutex) + ", which owner is thread " + str(edge.thread_mutex_owner))
     else:
         result.AppendMessage("there are no deadlocks in the process")
+
+
+def print_frames(debugger: lldb.SBDebugger) -> None:
+    target: lldb.SBTarget
+    target = debugger.GetSelectedTarget()
+
+    process: lldb.SBProcess
+    process = target.GetProcess()
+    print("num threads is " + str(process.GetNumThreads()))
+    for thread in process:
+        thread: lldb.SBThread
+        print("frames in the thread " + str(thread.GetIndexID()) + ":")
+        for frame in thread.get_thread_frames():
+            frame: lldb.SBFrame
+            print("\t" + frame.name)
 
 
 def __lldb_init_module(debugger: lldb.SBDebugger, internal_dict: dict):

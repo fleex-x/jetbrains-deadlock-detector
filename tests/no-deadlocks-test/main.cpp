@@ -22,6 +22,11 @@ public:
 };
 }  // namespace
 
+int nop() {
+	int x = 0;
+	return x;
+}
+
 int main() {
 	std::mutex m1;
 	std::mutex m2;
@@ -67,8 +72,9 @@ int main() {
 	std::thread t5([&]() {
 		latch.arrive_and_wait();
 		for (int i = 0; i < N; ++i) {
-			std::unique_lock<std::mutex> l1(m5);
+			std::unique_lock<std::mutex> l1(m5); 
 			//breakpoint
+			nop();
 		}
 
 	});

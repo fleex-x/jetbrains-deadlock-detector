@@ -22,20 +22,22 @@ public:
 };
 }  // namespace
 
+std::mutex m1;
+std::mutex m2;
+
 int main() {
-	std::mutex m1;
-	std::mutex m2;
 	latch latch(2);
 	std::thread t1([&]() {
 		latch.arrive_and_wait();
 		std::unique_lock<std::mutex> l1(m1);
-		std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(200));
+		std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(150));
+		//breakpoint
 		std::unique_lock<std::mutex> l2(m2);
 	});
 	std::thread t2([&]() {
 		latch.arrive_and_wait();
 		std::unique_lock<std::mutex> l2(m2);
-		std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(200));
+		std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(150));
 		std::unique_lock<std::mutex> l1(m1);
 	});
 
