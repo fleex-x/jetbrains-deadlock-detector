@@ -3,7 +3,7 @@ import deadlock_detector
 import test_tools
 
 
-class TestBigDeadlockClang(test_tools.MySetUpTestCase):
+class TestRecursiveMutexDeadlockClang(test_tools.MySetUpTestCase):
     def setUp(self) -> None:
         self.mySetUp(["main started", "thread started working"], "clang++")
 
@@ -17,7 +17,7 @@ class TestBigDeadlockClang(test_tools.MySetUpTestCase):
         self.assertTrue(deadlock_node_cycle == [6, 7, 8])
 
 
-class TestBigDeadlockCcc(test_tools.MySetUpTestCase):
+class TestRecursiveMutexDeadlockCcc(test_tools.MySetUpTestCase):
     def setUp(self) -> None:
         self.mySetUp(["main started", "thread started working"], "g++")
 
