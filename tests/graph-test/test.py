@@ -1,91 +1,145 @@
-import deadlock_detector
+from deadlock_detector import (ThreadGraph, ThreadEdge, LockCause, LockType)
 import unittest
 import test_tools
 
 
 class GraphTester(unittest.TestCase):
 
-    custom_lock_cause: deadlock_detector.LockCause
+    default_lock_cause: LockCause
 
     def setUp(self) -> None:
-        self.custom_lock_cause = deadlock_detector.LockCause(deadlock_detector.LockType.ThreadLockedByMutex, None)
+        self.default_lock_cause = LockCause(LockType.ThreadLockedByMutex, None)
 
     def test_with_loop(self):
-        g: deadlock_detector.ThreadGraph()
-        g = deadlock_detector.ThreadGraph()
-        g.add_edge(1, deadlock_detector.ThreadEdge(2, self.custom_lock_cause))
+        """"
+        edges:
+        1 -> 1
+
+        cycle:
+         1 -> 1
+        """
+        g: ThreadGraph()
+        g = ThreadGraph()
+        g.add_edge(1, ThreadEdge(1, self.default_lock_cause))
         has_cycle, cycle = g.find_cycle()
         self.assertTrue(has_cycle)
         self.assertTrue(len(cycle) == 1 and cycle[0][0] == 1 and cycle[0][1].locking_thread == 1)
 
     def test_cycle1(self):
-        g: deadlock_detector.ThreadGraph()
-        g = deadlock_detector.ThreadGraph()
-        g.add_edge(1, deadlock_detector.ThreadEdge(2, 2))
-        g.add_edge(2, deadlock_detector.ThreadEdge(3, 3))
-        g.add_edge(3, deadlock_detector.ThreadEdge(4, 4))
-        g.add_edge(4, deadlock_detector.ThreadEdge(5, 2))
-        cycle: [(int, deadlock_detector.ThreadEdge)]
+        """"
+        edges:
+        1 -> 2
+        2 -> 3
+        3 -> 4
+        4 -> 5
+        5 -> 2
+
+        cycle:
+        2 -> 3 -> 4 -> 5 -> 2
+        """
+        g: ThreadGraph()
+        g = ThreadGraph()
+        g.add_edge(1, ThreadEdge(2, self.default_lock_cause))
+        g.add_edge(2, ThreadEdge(3, self.default_lock_cause))
+        g.add_edge(3, ThreadEdge(4, self.default_lock_cause))
+        g.add_edge(4, ThreadEdge(5, self.default_lock_cause))
+        g.add_edge(5, ThreadEdge(2, self.default_lock_cause))
+        cycle: [(int, ThreadEdge)]
         has_cycle, cycle = g.find_cycle()
         self.assertTrue(has_cycle)
         self.assertTrue(test_tools.GraphTesting.cycle_eq(cycle,
-                                                         [(2, deadlock_detector.ThreadEdge(3, 3)),
-                                                          (3, deadlock_detector.ThreadEdge(4, 4)),
-                                                          (4, deadlock_detector.ThreadEdge(5, 2))]))
+                                                         [(2, ThreadEdge(3, self.default_lock_cause)),
+                                                          (3, ThreadEdge(4, self.default_lock_cause)),
+                                                          (4, ThreadEdge(5, self.default_lock_cause)),
+                                                          (5, ThreadEdge(2, self.default_lock_cause))]))
 
     def test_cycle2(self):
-        g: deadlock_detector.ThreadGraph()
-        g = deadlock_detector.ThreadGraph()
-        g.add_edge(1, deadlock_detector.ThreadEdge(10, 2))
-        g.add_edge(2, deadlock_detector.ThreadEdge(11, 3))
-        g.add_edge(3, deadlock_detector.ThreadEdge(12, 4))
-        g.add_edge(4, deadlock_detector.ThreadEdge(13, 10))
-        g.add_edge(5, deadlock_detector.ThreadEdge(2, 6))
-        g.add_edge(6, deadlock_detector.ThreadEdge(3, 7))
-        g.add_edge(7, deadlock_detector.ThreadEdge(4, 8))
-        g.add_edge(8, deadlock_detector.ThreadEdge(5, 5))
-        cycle: [(int, deadlock_detector.ThreadEdge)]
+        """"
+        edges:
+        1 -> 2
+        2 -> 3
+        3 -> 4
+        4 -> 0
+
+        7 -> 5
+        5 -> 6
+        6 -> 7
+
+        cycle:
+        7 -> 5 -> 6 -> 7
+        """
+        g: ThreadGraph()
+        g = ThreadGraph()
+        g.add_edge(1, ThreadEdge(2, self.default_lock_cause))
+        g.add_edge(2, ThreadEdge(3, self.default_lock_cause))
+        g.add_edge(3, ThreadEdge(4, self.default_lock_cause))
+        g.add_edge(4, ThreadEdge(0, self.default_lock_cause))
+
+        g.add_edge(7, ThreadEdge(5,  self.default_lock_cause))
+        g.add_edge(5, ThreadEdge(6,  self.default_lock_cause))
+        g.add_edge(6, ThreadEdge(7,  self.default_lock_cause))
+        cycle: [(int, ThreadEdge)]
         has_cycle, cycle = g.find_cycle()
         self.assertTrue(has_cycle)
         self.assertTrue(test_tools.GraphTesting.cycle_eq(cycle,
-                                                         [(5, deadlock_detector.ThreadEdge(2, 6)),
-                                                          (6, deadlock_detector.ThreadEdge(3, 7)),
-                                                          (7, deadlock_detector.ThreadEdge(4, 8)),
-                                                          (8, deadlock_detector.ThreadEdge(5, 5))]))
+                                                         [(7, ThreadEdge(5, self.default_lock_cause)),
+                                                          (5, ThreadEdge(6, self.default_lock_cause)),
+                                                          (6, ThreadEdge(7, self.default_lock_cause))]))
 
     def test_no_deadlocks1(self):
-        g: deadlock_detector.ThreadGraph()
-        g = deadlock_detector.ThreadGraph()
+        """
+        edges:
+        1 -> 2
+        2 -> 3
+        3 -> 4
+        4 -> 10
+        5 -> 6
+        6 -> 7
+        7 -> 8
+        8 -> 12
+        """
+        g: ThreadGraph()
+        g = ThreadGraph()
 
-        g.add_edge(1, deadlock_detector.ThreadEdge(10, 2))
-        g.add_edge(2, deadlock_detector.ThreadEdge(11, 3))
-        g.add_edge(3, deadlock_detector.ThreadEdge(12, 4))
-        g.add_edge(4, deadlock_detector.ThreadEdge(13, 10))
+        g.add_edge(1, ThreadEdge(2, self.default_lock_cause))
+        g.add_edge(2, ThreadEdge(3, self.default_lock_cause))
+        g.add_edge(3, ThreadEdge(4, self.default_lock_cause))
+        g.add_edge(4, ThreadEdge(10, self.default_lock_cause))
 
-        g.add_edge(5, deadlock_detector.ThreadEdge(2, 6))
-        g.add_edge(6, deadlock_detector.ThreadEdge(3, 7))
-        g.add_edge(7, deadlock_detector.ThreadEdge(4, 8))
-        g.add_edge(8, deadlock_detector.ThreadEdge(5, 12))
+        g.add_edge(5, ThreadEdge(6, self.default_lock_cause))
+        g.add_edge(6, ThreadEdge(7, self.default_lock_cause))
+        g.add_edge(7, ThreadEdge(8, self.default_lock_cause))
+        g.add_edge(8, ThreadEdge(12, self.default_lock_cause))
 
-        cycle: [(int, deadlock_detector.ThreadEdge)]
+        cycle: [(int, ThreadEdge)]
         has_cycle, _ = g.find_cycle()
         self.assertFalse(has_cycle)
 
     def test_no_deadlocks2(self):
-        g: deadlock_detector.ThreadGraph()
-        g = deadlock_detector.ThreadGraph()
-        g.add_edge(2, deadlock_detector.ThreadEdge(3, 4))
-        g.add_edge(3, deadlock_detector.ThreadEdge(2, 2))
-        g.add_edge(4, deadlock_detector.ThreadEdge(4, 5))
-        g.add_edge(5, deadlock_detector.ThreadEdge(5, 6))
-        g.add_edge(6, deadlock_detector.ThreadEdge(6, 7))
-        g.add_edge(7, deadlock_detector.ThreadEdge(7, 8))
-        g.add_edge(8, deadlock_detector.ThreadEdge(8, 9))
+        """
+        edges:
+        2 -> 4
+        3 -> 2
+        4 -> 5
+        5 -> 6
+        6 -> 7
+        7 -> 8
+        8 -> 9
+        """
+        g: ThreadGraph()
+        g = ThreadGraph()
+        g.add_edge(2, ThreadEdge(4, self.default_lock_cause))
+        g.add_edge(3, ThreadEdge(2, self.default_lock_cause))
+        g.add_edge(4, ThreadEdge(5, self.default_lock_cause))
+        g.add_edge(5, ThreadEdge(6, self.default_lock_cause))
+        g.add_edge(6, ThreadEdge(7, self.default_lock_cause))
+        g.add_edge(7, ThreadEdge(8, self.default_lock_cause))
+        g.add_edge(8, ThreadEdge(9, self.default_lock_cause))
         has_cycle, _ = g.find_cycle()
         self.assertFalse(has_cycle)
 
     def test_no_deadlocks_empty_graph(self):
-        g: deadlock_detector.ThreadGraph()
-        g = deadlock_detector.ThreadGraph()
+        g: ThreadGraph()
+        g = ThreadGraph()
         has_cycle, _ = g.find_cycle()
         self.assertFalse(has_cycle)
