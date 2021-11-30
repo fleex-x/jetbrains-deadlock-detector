@@ -5,13 +5,18 @@ import test_tools
 
 class GraphTester(unittest.TestCase):
 
+    custom_lock_cause: deadlock_detector.LockCause
+
+    def setUp(self) -> None:
+        self.custom_lock_cause = deadlock_detector.LockCause(deadlock_detector.LockType.ThreadLockedByMutex, None)
+
     def test_with_loop(self):
         g: deadlock_detector.ThreadGraph()
         g = deadlock_detector.ThreadGraph()
-        g.add_edge(1, deadlock_detector.ThreadEdge(2, 1))
+        g.add_edge(1, deadlock_detector.ThreadEdge(2, self.custom_lock_cause))
         has_cycle, cycle = g.find_cycle()
         self.assertTrue(has_cycle)
-        self.assertTrue(len(cycle) == 1 and cycle[0][0] == 1 and cycle[0][1].mutex == 2 and cycle[0][1].thread_mutex_owner == 1)
+        self.assertTrue(len(cycle) == 1 and cycle[0][0] == 1 and cycle[0][1].locking_thread == 1)
 
     def test_cycle1(self):
         g: deadlock_detector.ThreadGraph()
