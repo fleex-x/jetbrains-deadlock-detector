@@ -188,15 +188,6 @@ def after_syscall(frame: lldb.SBFrame, target: lldb.SBTarget) -> bool:
     return prev_instruction.GetMnemonic(target) == "syscall"
 
 
-def get_rdi_register_value(frame: lldb.SBFrame) -> int:
-    for reg_group in frame.registers:
-        if reg_group.name == "General Purpose Registers":
-            for reg in reg_group.children:
-                if reg.name == "rdi":
-                    return reg.GetValueAsUnsigned()
-    assert False
-
-
 def detect_pending_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, int):
     if not is_last_two_frames_blocking_mutex(thread.get_thread_frames(), target):
         return None
@@ -204,7 +195,7 @@ def detect_pending_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, 
     current_frame = thread.get_thread_frames()[0]
     if not after_syscall(current_frame, target):
         return None
-    mutex_addr = get_rdi_register_value(current_frame)
+    mutex_addr = current_frame.FindRegister("rdi").GetValueAsUnsigned()
     error = lldb.SBError()
     int_size = 4
     unsigned_int_size = 4
