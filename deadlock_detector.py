@@ -58,7 +58,8 @@ def disassemble_into_bytes(frame: lldb.SBFrame, target: lldb.SBTarget) -> [int]:
     return res
 
 
-def is_last_two_frames_blocking_mutex(frames: [lldb.SBFrame], target: lldb.SBTarget) -> bool:
+def is_last_two_frames_blocking_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> bool:
+    frames = thread.get_thread_frames()
     if len(frames) < 2:
         return False
     return (TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[0], target),
@@ -91,7 +92,7 @@ def detect_pending_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, 
     :return: Mutex address and mutex owner
     """
 
-    if not is_last_two_frames_blocking_mutex(thread.get_thread_frames(), target):
+    if not is_last_two_frames_blocking_mutex(thread, target):
         return None
     current_frame: lldb.SBFrame
     current_frame = thread.get_thread_frames()[0]
@@ -106,7 +107,11 @@ def detect_pending_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, 
 
 
 def is_last_frame_join(thread: lldb.SBThread, target: lldb.SBTarget) -> bool:
-    return False
+    frames = thread.get_thread_frames()
+    if len(frames) < 1:
+        return False
+    return (TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[0], target),
+                                                   assemblytemplates.__pthread_clockjoin_ex_binary_instructions_template()))
 
 
 def detect_current_join(thread: lldb.SBThread, target: lldb.SBTarget) -> Optional[int]:
@@ -115,14 +120,17 @@ def detect_current_join(thread: lldb.SBThread, target: lldb.SBTarget) -> Optiona
     :param target: Current target
     :return: The thread id that is now joining
     """
-
     if not is_last_frame_join(thread, target):
         return None
     current_frame: lldb.SBFrame
     current_frame = thread.get_thread_frames()[0]
     if not after_syscall(current_frame, target):
         return None
-    return current_frame.FindRegister("rdi").GetValueAsUnsigned()
+    error = lldb.SBError()
+    unsigned_int_size = 4
+    thread_id_addr = current_frame.FindRegister("rdi").GetValueAsUnsigned()
+    thread_id = target.GetProcess().ReadUnsignedFromMemory(thread_id_addr, unsigned_int_size, error)
+    return thread_id
 
 
 def detect_lock(thread: lldb.SBThread, target: lldb.SBTarget) -> Optional[ThreadEdge]:
@@ -134,10 +142,11 @@ def detect_lock(thread: lldb.SBThread, target: lldb.SBTarget) -> Optional[Thread
     if mutex_info:
         mutex_addr, mutex_owner = mutex_info
         mutex_owner = process.GetThreadByID(mutex_owner).GetIndexID()
-        return ThreadEdge(mutex_owner, LockCause(LockType.ThreadLockedByMutex, mutex_owner))
+        return ThreadEdge(mutex_owner, LockCause(LockType.ThreadLockedByMutex, mutex_addr))
 
     joining_thread = detect_current_join(thread, target)
     if joining_thread:
+        joining_thread = process.GetThreadByID(joining_thread).GetIndexID()
         return ThreadEdge(joining_thread, LockCause(LockType.ThreadLockedByJoin, None))
     return None
 
