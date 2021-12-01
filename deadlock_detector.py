@@ -2,6 +2,7 @@ import lldb
 import os
 from typing import Optional
 from threadgraph import (ThreadGraph, ThreadEdge, LockCause, LockType, lock_type_to_str)
+import assemblytemplates
 
 
 class TemplateChecker:
@@ -35,14 +36,6 @@ class TemplateChecker:
         return True
 
 
-dir_name = "deadlock_detector_project"
-global_path = os.getcwd()[0:os.getcwd().find(dir_name)] + dir_name + "/src/"
-__lll_lock_wait_binary_instructions_template = TemplateChecker.load_template(
-    global_path + "res/__lll_lock_wait_binary_instructions_template.txt")
-__GI___pthread_mutex_lock_instructions_template = TemplateChecker.load_template(
-    global_path + "res/__GI___pthread_mutex_lock_instructions_template.txt")
-
-
 def get_bytes_from_data(data: lldb.SBData) -> [int]:
     size = data.GetByteSize()
     res: list
@@ -69,9 +62,9 @@ def is_last_two_frames_blocking_mutex(frames: [lldb.SBFrame], target: lldb.SBTar
     if len(frames) < 2:
         return False
     return (TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[0], target),
-                                                   __lll_lock_wait_binary_instructions_template) and
+                                                   assemblytemplates.__lll_lock_wait_binary_instructions_template()) and
             TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[1], target),
-                                                   __GI___pthread_mutex_lock_instructions_template))
+                                                   assemblytemplates.__GI___pthread_mutex_lock_binary_instructions_template()))
 
 
 def get_prev_instruction(frame: lldb.SBFrame, instruction_addr: int, target: lldb.SBTarget) -> Optional[lldb.SBInstruction]:
