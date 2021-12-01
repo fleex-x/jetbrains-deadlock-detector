@@ -3,7 +3,7 @@ import deadlock_detector
 import test_tools
 
 
-class TestSharedMutexDeadlockClang(test_tools.MySetUpTestCase):
+class TestSharedMutexReaderDeadlockClang(test_tools.MySetUpTestCase):
     def setUp(self) -> None:
         self.mySetUp(["main started", "thread started working"], "clang++")
 
@@ -22,7 +22,7 @@ class TestSharedMutexDeadlockClang(test_tools.MySetUpTestCase):
                                          deadlock_detector.LockType.ThreadLockedByMutex])
 
 
-class TestSharedMutexDeadlockGcc(test_tools.MySetUpTestCase):
+class TestSharedMutexReaderDeadlockGcc(test_tools.MySetUpTestCase):
     def setUp(self) -> None:
         self.mySetUp(["main started", "thread started working"], "g++")
 
