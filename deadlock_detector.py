@@ -189,6 +189,12 @@ def after_syscall(frame: lldb.SBFrame, target: lldb.SBTarget) -> bool:
 
 
 def detect_pending_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, int):
+    """
+    :param thread: Current thread
+    :param target: Current target
+    :return: Mutex address and mutex owner
+    """
+
     if not is_last_two_frames_blocking_mutex(thread.get_thread_frames(), target):
         return None
     current_frame: lldb.SBFrame
@@ -203,6 +209,26 @@ def detect_pending_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, 
     return mutex_addr, mutex_owner
 
 
+def is_last_frame_join(thread: lldb.SBThread, target: lldb.SBTarget) -> bool:
+    return False
+
+
+def detect_current_join(thread: lldb.SBThread, target: lldb.SBTarget) -> Optional[int]:
+    """
+    :param thread: Current thread
+    :param target: Current target
+    :return: The thread id that is now joining
+    """
+
+    if not is_last_frame_join(thread, target):
+        return None
+    current_frame: lldb.SBFrame
+    current_frame = thread.get_thread_frames()[0]
+    if not after_syscall(current_frame, target):
+        return None
+    return current_frame.FindRegister("rdi").GetValueAsUnsigned()
+
+
 def detect_lock(thread: lldb.SBThread, target: lldb.SBTarget) -> Optional[ThreadEdge]:
 
     process: lldb.SBProcess
@@ -213,6 +239,10 @@ def detect_lock(thread: lldb.SBThread, target: lldb.SBTarget) -> Optional[Thread
         mutex_addr, mutex_owner = mutex_info
         mutex_owner = process.GetThreadByID(mutex_owner).GetIndexID()
         return ThreadEdge(mutex_owner, LockCause(LockType.ThreadLockedByMutex, mutex_owner))
+
+    joining_thread = detect_current_join(thread, target)
+    if joining_thread:
+        return ThreadEdge(joining_thread, LockCause(LockType.ThreadLockedByJoin, None))
     return None
 
 
