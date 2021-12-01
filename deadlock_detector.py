@@ -6,21 +6,6 @@ import assemblytemplates
 
 class TemplateChecker:
     @staticmethod
-    def load_template(path_to_file: str) -> [[int]]:
-        res = []
-
-        def str_to_int(my_str: str):
-            if my_str == "-1":
-                return -1
-            else:
-                return int("0x" + my_str, base=16)
-
-        with open(path_to_file, "r") as template_source:
-            for line in template_source.readlines():
-                res.append(list(map(str_to_int, line.rstrip().split(" "))))
-        return res
-
-    @staticmethod
     def is_matched_by_template(to_check_lst: [[int]], template_lst: [[int]]) -> bool:
         if len(to_check_lst) != len(template_lst):
             return False
@@ -57,16 +42,6 @@ def disassemble_into_bytes(frame: lldb.SBFrame, target: lldb.SBTarget) -> [int]:
     return res
 
 
-def is_last_two_frames_blocking_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> bool:
-    frames = thread.get_thread_frames()
-    if len(frames) < 2:
-        return False
-    return (TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[0], target),
-                                                   assemblytemplates.__lll_lock_wait_binary_instructions_template()) and
-            TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[1], target),
-                                                   assemblytemplates.__GI___pthread_mutex_lock_binary_instructions_template()))
-
-
 def get_prev_instruction(frame: lldb.SBFrame, instruction_addr: int, target: lldb.SBTarget) -> Optional[lldb.SBInstruction]:
     prev = None
     for instruction in frame.GetFunction().GetInstructions(target):
@@ -84,11 +59,21 @@ def after_syscall(frame: lldb.SBFrame, target: lldb.SBTarget) -> bool:
     return prev_instruction.GetMnemonic(target) == "syscall"
 
 
+def is_last_two_frames_blocking_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> bool:
+    frames = thread.get_thread_frames()
+    if len(frames) < 2:
+        return False
+    return (TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[0], target),
+                                                   assemblytemplates.__lll_lock_wait_binary_instructions_template()) and
+            TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[1], target),
+                                                   assemblytemplates.__GI___pthread_mutex_lock_binary_instructions_template()))
+
+
 def detect_pending_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, int):
     """
     :param thread: Current thread
     :param target: Current target
-    :return: Mutex address and mutex owner
+    :return: The mutex that is locking the thread (its address and owner)
     """
 
     if not is_last_two_frames_blocking_mutex(thread, target):
@@ -132,7 +117,36 @@ def detect_current_join(thread: lldb.SBThread, target: lldb.SBTarget) -> Optiona
     return thread_id
 
 
-def detect_lock(thread: lldb.SBThread, target: lldb.SBTarget) -> Optional[ThreadEdge]:
+def is_last_two_frames_locking_shared_mutex_reader(thread: lldb.SBThread, target: lldb.SBTarget) -> bool:
+    frames = thread.get_thread_frames()
+    if len(frames) < 1:
+        return False
+    return (TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[0], target),
+                                                   assemblytemplates.__GI___pthread_rwlock_rdlock_instructions_template()))
+
+
+def detect_pending_shared_mutex_reader(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, int):
+    """
+    :param thread: Current thread
+    :param target: Current target
+    :return: The shared mutex that is locking the thread by reading (its address and owner)
+    """
+    if not is_last_two_frames_locking_shared_mutex_reader(thread, target):
+        return None
+    current_frame: lldb.SBFrame
+    current_frame = thread.get_thread_frames()[0]
+    if not after_syscall(current_frame, target):
+        return None
+    int_size = 4
+    unsigned_int_size = 4
+    mutex_addr = current_frame.FindRegister("rdi").GetValueAsUnsigned() - unsigned_int_size * 2
+    error = lldb.SBError()
+    mutex_owner = target.GetProcess().ReadUnsignedFromMemory(mutex_addr + 6 * unsigned_int_size, int_size, error)
+    # If the mutex cannot get read access, then it now has a single writing thread (mutex_owner is a writer)
+    return mutex_addr, mutex_owner
+
+
+def detect_current_lock(thread: lldb.SBThread, target: lldb.SBTarget) -> Optional[ThreadEdge]:
 
     process: lldb.SBProcess
     process = target.GetProcess()
@@ -147,6 +161,13 @@ def detect_lock(thread: lldb.SBThread, target: lldb.SBTarget) -> Optional[Thread
     if joining_thread:
         joining_thread = process.GetThreadByID(joining_thread).GetIndexID()
         return ThreadEdge(joining_thread, LockCause(LockType.ThreadLockedByJoin, None))
+
+    shared_mutex_reader_info = detect_pending_shared_mutex_reader(thread, target)
+    if shared_mutex_reader_info:
+        mutex_addr, mutex_owner = shared_mutex_reader_info
+        mutex_owner = process.GetThreadByID(mutex_owner).GetIndexID()
+        return ThreadEdge(mutex_owner, LockCause(LockType.ThreadLockedBySharedMutexReader, mutex_addr))
+
     return None
 
 
@@ -161,7 +182,7 @@ def find_deadlock(debugger: lldb.SBDebugger) -> (bool, [(int, ThreadEdge)]):
     g = ThreadGraph()
     for thread in process:
         thread: lldb.SBThread
-        thread_edge = detect_lock(thread, target)
+        thread_edge = detect_current_lock(thread, target)
         if thread_edge:
             g.add_edge(thread.GetIndexID(), thread_edge)
     return g.find_cycle()
@@ -177,7 +198,7 @@ def find_deadlock_console(debugger: lldb.SBDebugger, command: str, result: lldb.
             msg = "thread " + str(node) + " is waiting for thread " + str(edge.locking_thread)
             msg += ": cause is " + lock_type_to_str(edge.lock_cause.lock_type)
             if edge.lock_cause.synchronizer_addr:
-                msg += ": with address " + hex(edge.lock_cause.synchronizer_addr)
+                msg += " with address " + hex(edge.lock_cause.synchronizer_addr)
             result.AppendMessage(msg)
     else:
         result.AppendMessage("no deadlocks found")

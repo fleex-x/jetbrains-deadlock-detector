@@ -10,7 +10,8 @@ class UsedState(Enum):
 class LockType(Enum):
     ThreadLockedByMutex = 1  # mutex and recursive_mutex
     ThreadLockedByJoin = 2
-    ThreadLockedBySharedMutex = 3
+    ThreadLockedBySharedMutexReader = 3
+    ThreadLockedBySharedMutexWriter = 4
 
 
 def lock_type_to_str(lock_type: LockType):
@@ -18,8 +19,10 @@ def lock_type_to_str(lock_type: LockType):
         return "mutex (usual or recursive)"
     if lock_type == LockType.ThreadLockedByJoin:
         return "join"
-    if lock_type == LockType.ThreadLockedBySharedMutex:
-        return "shared mutex"
+    if lock_type == LockType.ThreadLockedBySharedMutexReader:
+        return "shared mutex reader"
+    if lock_type == LockType.ThreadLockedBySharedMutexWriter:
+        return "shared mutex writer"
 
 
 class LockCause:
@@ -41,9 +44,6 @@ class ThreadEdge:
     def __init__(self, locking_thread: int, lock_cause: LockCause):
         self.locking_thread = locking_thread
         self.lock_cause = lock_cause
-
-    # def __str__(self):
-    #     return "(" + hex(self.mutex) + ", " + str(self.waiting_for_thread) + ")"
 
     def __eq__(self, other):
         return self.lock_cause == other.lock_cause and self.locking_thread == other.locking_thread
