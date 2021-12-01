@@ -1,7 +1,7 @@
 import lldb
 import os
 from typing import Optional
-from threadgraph import (ThreadGraph, ThreadEdge, LockCause, LockType)
+from threadgraph import (ThreadGraph, ThreadEdge, LockCause, LockType, lock_type_to_str)
 
 
 class TemplateChecker:
