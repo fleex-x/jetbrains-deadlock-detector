@@ -15,7 +15,7 @@ class TestSharedMutexReaderDeadlockClang(test_tools.MySetUpTestCase):
         self.assertTrue(has_deadlock)
         deadlock_cycle = test_tools.GraphTesting.shift_cycle(deadlock_cycle, 1)
         deadlock_node_cycle = [x[0] for x in deadlock_cycle]
-        locks_causes = [x[1].lock_cause.lock_type for x in deadlock_cycle]
+        locks_causes = [x[1].locking_reason.lock_type for x in deadlock_cycle]
         self.assertTrue(deadlock_node_cycle == [1, 2, 3])
         self.assertTrue(locks_causes == [deadlock_detector.LockType.ThreadLockedByJoin,
                                          deadlock_detector.LockType.ThreadLockedBySharedMutexReader,
@@ -34,7 +34,7 @@ class TestSharedMutexReaderDeadlockGcc(test_tools.MySetUpTestCase):
         self.assertTrue(has_deadlock)
         deadlock_cycle = test_tools.GraphTesting.shift_cycle(deadlock_cycle, 1)
         deadlock_node_cycle = [x[0] for x in deadlock_cycle]
-        locks_causes = [x[1].lock_cause.lock_type for x in deadlock_cycle]
+        locks_causes = [x[1].locking_reason.lock_type for x in deadlock_cycle]
         self.assertTrue(deadlock_node_cycle == [1, 2, 3])
         self.assertTrue(locks_causes == [deadlock_detector.LockType.ThreadLockedByJoin,
                                          deadlock_detector.LockType.ThreadLockedBySharedMutexReader,

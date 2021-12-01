@@ -1,14 +1,14 @@
-from threadgraph import (ThreadGraph, ThreadEdge, LockCause, LockType)
+from threadgraph import (ThreadGraph, ThreadEdge, LockingReason, LockType)
 import unittest
 import test_tools
 
 
 class GraphTester(unittest.TestCase):
 
-    default_lock_cause: LockCause
+    default_lock_cause: LockingReason
 
     def setUp(self) -> None:
-        self.default_lock_cause = LockCause(LockType.ThreadLockedByMutex, None)
+        self.default_lock_cause = LockingReason(LockType.ThreadLockedByMutex, None)
 
     def test_with_loop(self):
         """"

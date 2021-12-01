@@ -25,7 +25,7 @@ def lock_type_to_str(lock_type: LockType):
         return "shared mutex writer"
 
 
-class LockCause:
+class LockingReason:
     lock_type: LockType
     synchronizer_addr: Optional[int]  # synchronizer is usually a mutex
 
@@ -39,14 +39,14 @@ class LockCause:
 
 class ThreadEdge:
     locking_thread: int
-    lock_cause: LockCause
+    locking_reason: LockingReason
 
-    def __init__(self, locking_thread: int, lock_cause: LockCause):
+    def __init__(self, locking_thread: int, lock_cause: LockingReason):
         self.locking_thread = locking_thread
-        self.lock_cause = lock_cause
+        self.locking_reason = lock_cause
 
     def __eq__(self, other):
-        return self.lock_cause == other.lock_cause and self.locking_thread == other.locking_thread
+        return self.locking_reason == other.locking_reason and self.locking_thread == other.locking_thread
 
 
 class BoolRef:

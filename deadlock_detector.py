@@ -1,6 +1,6 @@
 import lldb
 from typing import Optional
-from threadgraph import (ThreadGraph, ThreadEdge, LockCause, LockType, lock_type_to_str)
+from threadgraph import (ThreadGraph, ThreadEdge, LockingReason, LockType, lock_type_to_str)
 import assemblytemplates
 
 
@@ -191,25 +191,25 @@ def detect_current_lock(thread: lldb.SBThread, target: lldb.SBTarget) -> Optiona
     if mutex_info:
         mutex_addr, mutex_owner = mutex_info
         mutex_owner = process.GetThreadByID(mutex_owner).GetIndexID()
-        return ThreadEdge(mutex_owner, LockCause(LockType.ThreadLockedByMutex, mutex_addr))
+        return ThreadEdge(mutex_owner, LockingReason(LockType.ThreadLockedByMutex, mutex_addr))
 
     joining_thread = detect_current_join(thread, target)
     if joining_thread:
         joining_thread = process.GetThreadByID(joining_thread).GetIndexID()
-        return ThreadEdge(joining_thread, LockCause(LockType.ThreadLockedByJoin, None))
+        return ThreadEdge(joining_thread, LockingReason(LockType.ThreadLockedByJoin, None))
 
     shared_mutex_reader_info = detect_pending_shared_mutex_reader(thread, target)
     if shared_mutex_reader_info:
         mutex_addr, mutex_owner = shared_mutex_reader_info
         mutex_owner = process.GetThreadByID(mutex_owner).GetIndexID()
-        return ThreadEdge(mutex_owner, LockCause(LockType.ThreadLockedBySharedMutexReader, mutex_addr))
+        return ThreadEdge(mutex_owner, LockingReason(LockType.ThreadLockedBySharedMutexReader, mutex_addr))
 
     shared_mutex_writer_info = detect_pending_shared_mutex_writer(thread, target)
     if shared_mutex_writer_info:
         mutex_addr, mutex_owner = shared_mutex_writer_info
         if mutex_owner:
             mutex_owner = process.GetThreadByID(mutex_owner).GetIndexID()
-            return ThreadEdge(mutex_owner, LockCause(LockType.ThreadLockedBySharedMutexWriter, mutex_addr))
+            return ThreadEdge(mutex_owner, LockingReason(LockType.ThreadLockedBySharedMutexWriter, mutex_addr))
     return None
 
 
@@ -238,12 +238,44 @@ def find_deadlock_console(debugger: lldb.SBDebugger, command: str, result: lldb.
         for node, edge in cycle:
             edge: ThreadEdge
             msg = "thread " + str(node) + " is waiting for thread " + str(edge.locking_thread)
-            msg += ": cause is " + lock_type_to_str(edge.lock_cause.lock_type)
-            if edge.lock_cause.synchronizer_addr:
-                msg += " with address " + hex(edge.lock_cause.synchronizer_addr)
+            msg += ": cause is " + lock_type_to_str(edge.locking_reason.lock_type)
+            if edge.locking_reason.synchronizer_addr:
+                msg += " with address " + hex(edge.locking_reason.synchronizer_addr)
             result.AppendMessage(msg)
     else:
         result.AppendMessage("no deadlocks found")
+
+
+def find_locking_reasons(debugger: lldb.SBDebugger) -> [(int, ThreadEdge)]:
+    target: lldb.SBTarget
+    target = debugger.GetSelectedTarget()
+
+    process: lldb.SBProcess
+    process = target.GetProcess()
+
+    res = []
+    for thread in process:
+        thread: lldb.SBThread
+        thread_edge = detect_current_lock(thread, target)
+        if thread_edge:
+            res.append((thread.GetIndexID(), thread_edge))
+    return res
+
+
+def find_locking_reasons_console(debugger: lldb.SBDebugger, command: str, result: lldb.SBCommandReturnObject,
+                          internal_dict: dict) -> None:
+    reasons = find_locking_reasons(debugger)
+    result.AppendMessage("locking reasons: ")
+    for thread, thread_edge in reasons:
+        thread: int
+        thread_edge: ThreadEdge
+        msg = "Thread " + str(thread) + " is locked because of " + lock_type_to_str(thread_edge.locking_reason.lock_type)
+        if thread_edge.locking_reason.synchronizer_addr:
+            msg += " with address " + hex(thread_edge.locking_reason.synchronizer_addr)
+        msg += ". "
+        if thread_edge.locking_thread:
+            msg += "This thread is waiting for thread " + str(thread_edge.locking_thread) + "."
+        result.AppendMessage(msg)
 
 
 def print_frames(debugger: lldb.SBDebugger) -> None:
@@ -263,5 +295,6 @@ def print_frames(debugger: lldb.SBDebugger) -> None:
 
 def __lldb_init_module(debugger: lldb.SBDebugger, internal_dict: dict):
     debugger.HandleCommand("command script add -f " + __name__ + ".find_deadlock_console find_deadlock")
+    debugger.HandleCommand("command script add -f " + __name__ + ".find_locking_reasons_console locking_reasons")
 
 # command script import deadlock_detector.py
