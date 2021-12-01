@@ -15,14 +15,14 @@ int main() {
 		for (int i = 0; i < 10000; ++i) {
 			std::unique_lock<std::shared_mutex> l1(m1); 
 			no_opearation(); //thread started working
-			std::shared_lock<std::shared_mutex> l2(m2);
+			std::unique_lock<std::shared_mutex> l2(m2);
 		}
 	});
 	std::thread t2([&]() {
 		for (int i = 0; i < 10000; ++i) {
 			std::unique_lock<std::shared_mutex> l1(m2);
 			no_opearation(); //thread started working
-			std::shared_lock<std::shared_mutex> l2(m1);
+			std::unique_lock<std::shared_mutex> l2(m1);
 		}
 	});
 	

@@ -117,7 +117,7 @@ def detect_current_join(thread: lldb.SBThread, target: lldb.SBTarget) -> Optiona
     return thread_id
 
 
-def is_last_two_frames_locking_shared_mutex_reader(thread: lldb.SBThread, target: lldb.SBTarget) -> bool:
+def is_last_frame_locking_shared_mutex_reader(thread: lldb.SBThread, target: lldb.SBTarget) -> bool:
     frames = thread.get_thread_frames()
     if len(frames) < 1:
         return False
@@ -131,7 +131,7 @@ def detect_pending_shared_mutex_reader(thread: lldb.SBThread, target: lldb.SBTar
     :param target: Current target
     :return: The shared mutex that is locking the thread by reading (its address and owner)
     """
-    if not is_last_two_frames_locking_shared_mutex_reader(thread, target):
+    if not is_last_frame_locking_shared_mutex_reader(thread, target):
         return None
     current_frame: lldb.SBFrame
     current_frame = thread.get_thread_frames()[0]
@@ -143,6 +143,42 @@ def detect_pending_shared_mutex_reader(thread: lldb.SBThread, target: lldb.SBTar
     error = lldb.SBError()
     mutex_owner = target.GetProcess().ReadUnsignedFromMemory(mutex_addr + 6 * unsigned_int_size, int_size, error)
     # If the mutex cannot get read access, then it now has a single writing thread (mutex_owner is a writer)
+    return mutex_addr, mutex_owner
+
+
+def is_last_frame_locking_shared_mutex_writer(thread: lldb.SBThread, target: lldb.SBTarget) -> bool:
+    frames = thread.get_thread_frames()
+    if len(frames) < 1:
+        return False
+    return (TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[0], target),
+                                                   assemblytemplates.__GI___pthread_rwlock_wrlock_instructions_template()))
+
+
+def detect_pending_shared_mutex_writer(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, int):
+    """
+    :param thread: Current thread
+    :param target: Current target
+    :return: The shared mutex that is locking the thread by reading (its address and owner)
+    """
+    if not is_last_frame_locking_shared_mutex_writer(thread, target):
+        return None
+
+    current_frame: lldb.SBFrame
+    current_frame = thread.get_thread_frames()[0]
+    if not after_syscall(current_frame, target):
+        return None
+
+    int_size = 4
+    unsigned_int_size = 4
+    mutex_addr = current_frame.FindRegister("rdi").GetValueAsUnsigned() - unsigned_int_size * 3
+
+    error = lldb.SBError()
+    is_shared = target.GetProcess().ReadUnsignedFromMemory(mutex_addr + 7 * unsigned_int_size, int_size, error)
+
+    if is_shared != 0:
+        return mutex_addr, None
+
+    mutex_owner = target.GetProcess().ReadUnsignedFromMemory(mutex_addr + 6 * unsigned_int_size, int_size, error)
     return mutex_addr, mutex_owner
 
 
@@ -168,6 +204,12 @@ def detect_current_lock(thread: lldb.SBThread, target: lldb.SBTarget) -> Optiona
         mutex_owner = process.GetThreadByID(mutex_owner).GetIndexID()
         return ThreadEdge(mutex_owner, LockCause(LockType.ThreadLockedBySharedMutexReader, mutex_addr))
 
+    shared_mutex_writer_info = detect_pending_shared_mutex_writer(thread, target)
+    if shared_mutex_writer_info:
+        mutex_addr, mutex_owner = shared_mutex_writer_info
+        if mutex_owner:
+            mutex_owner = process.GetThreadByID(mutex_owner).GetIndexID()
+            return ThreadEdge(mutex_owner, LockCause(LockType.ThreadLockedBySharedMutexWriter, mutex_addr))
     return None
 
 
