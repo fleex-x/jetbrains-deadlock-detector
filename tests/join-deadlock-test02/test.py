@@ -35,9 +35,3 @@ class TestSmallJoinDeadlockCcc(test_tools.MySetUpTestCase):
         locks_causes = [x[1].locking_reason.lock_type for x in deadlock_cycle]
         self.assertTrue(deadlock_node_cycle == [1, 2])
         self.assertTrue(locks_causes == [deadlock_detector.LockType.ThreadLockedByJoin, deadlock_detector.LockType.ThreadLockedByMutex])
-
-
-
-
-
-

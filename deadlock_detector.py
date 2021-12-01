@@ -210,6 +210,8 @@ def detect_current_lock(thread: lldb.SBThread, target: lldb.SBTarget) -> Optiona
         if mutex_owner:
             mutex_owner = process.GetThreadByID(mutex_owner).GetIndexID()
             return ThreadEdge(mutex_owner, LockingReason(LockType.ThreadLockedBySharedMutexWriter, mutex_addr))
+        else:
+            return ThreadEdge(None, LockingReason(LockType.ThreadLockedBySharedMutexWriter, mutex_addr))
     return None
 
 
@@ -225,7 +227,7 @@ def find_deadlock(debugger: lldb.SBDebugger) -> (bool, [(int, ThreadEdge)]):
     for thread in process:
         thread: lldb.SBThread
         thread_edge = detect_current_lock(thread, target)
-        if thread_edge:
+        if thread_edge and thread_edge.locking_thread:
             g.add_edge(thread.GetIndexID(), thread_edge)
     return g.find_cycle()
 
