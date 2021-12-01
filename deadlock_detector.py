@@ -1,5 +1,4 @@
 import lldb
-import os
 from typing import Optional
 from threadgraph import (ThreadGraph, ThreadEdge, LockCause, LockType, lock_type_to_str)
 import assemblytemplates
@@ -151,7 +150,7 @@ def detect_lock(thread: lldb.SBThread, target: lldb.SBTarget) -> Optional[Thread
     return None
 
 
-def find_deadlock(debugger: lldb.SBDebugger) -> (bool, [(int, int)]):
+def find_deadlock(debugger: lldb.SBDebugger) -> (bool, [(int, ThreadEdge)]):
     target: lldb.SBTarget
     target = debugger.GetSelectedTarget()
 
