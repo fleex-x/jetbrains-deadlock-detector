@@ -203,6 +203,19 @@ def detect_pending_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, 
     return mutex_addr, mutex_owner
 
 
+def detect_lock(thread: lldb.SBThread, target: lldb.SBTarget) -> Optional[ThreadEdge]:
+
+    process: lldb.SBProcess
+    process = target.GetProcess()
+
+    mutex_info = detect_pending_mutex(thread, target)
+    if mutex_info:
+        mutex_addr, mutex_owner = mutex_info
+        mutex_owner = process.GetThreadByID(mutex_owner).GetIndexID()
+        return ThreadEdge(mutex_owner, LockCause(LockType.ThreadLockedByMutex, mutex_owner))
+    return None
+
+
 def find_deadlock(debugger: lldb.SBDebugger) -> (bool, [(int, int)]):
     target: lldb.SBTarget
     target = debugger.GetSelectedTarget()
@@ -214,11 +227,9 @@ def find_deadlock(debugger: lldb.SBDebugger) -> (bool, [(int, int)]):
     g = ThreadGraph()
     for thread in process:
         thread: lldb.SBThread
-        mutex_info = detect_pending_mutex(thread, target)
-        if mutex_info:
-            mutex_addr, mutex_owner = mutex_info
-            mutex_owner = process.GetThreadByID(mutex_owner).GetIndexID()
-            g.add_edge(thread.GetIndexID(), ThreadEdge(mutex_owner, LockCause(LockType.ThreadLockedByMutex, mutex_addr)))
+        thread_edge = detect_lock(thread, target)
+        if thread_edge:
+            g.add_edge(thread.GetIndexID(), thread_edge)
     return g.find_cycle()
 
 
