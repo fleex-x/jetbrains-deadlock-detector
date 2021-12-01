@@ -1,4 +1,4 @@
-from deadlock_detector import (ThreadGraph, ThreadEdge, LockCause, LockType)
+from threadgraph import (ThreadGraph, ThreadEdge, LockCause, LockType)
 import unittest
 import test_tools
 
