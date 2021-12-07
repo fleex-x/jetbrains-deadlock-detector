@@ -1,5 +1,6 @@
 import lldb
 from typing import Optional
+from  typing import  F
 from threadgraph import (ThreadGraph, ThreadEdge, LockingReason, LockType, lock_type_to_str)
 import assemblytemplates
 
@@ -158,7 +159,7 @@ def detect_pending_shared_mutex_writer(thread: lldb.SBThread, target: lldb.SBTar
     """
     :param thread: Current thread
     :param target: Current target
-    :return: The shared mutex that is locking the thread by reading (its address and owner)
+    :return: The shared mutex that is locking the thread by writing (its address and owner)
     """
     if not is_last_frame_locking_shared_mutex_writer(thread, target):
         return None
