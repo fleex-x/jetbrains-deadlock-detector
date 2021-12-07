@@ -25,20 +25,20 @@ def set_breakpoints(path_to_file: str, breakpoint_name: str, target: lldb.SBTarg
 
 class GraphTesting:
     @staticmethod
-    def shift_cycle(cycle: [(int, deadlock_detector.ThreadEdge)], first_node: int) -> [(int, deadlock_detector.ThreadEdge)]:
+    def shift_cycle(cycle: [deadlock_detector.ThreadInfo], first_node: int) -> [deadlock_detector.ThreadInfo]:
         for i, cycle_elem in enumerate(cycle):
-            if cycle_elem[0] == first_node:
+            if cycle_elem.thread_id == first_node:
                 return cycle[i:] + cycle[:i]
         assert False
 
     @staticmethod
-    def cycle_eq(cycle1: [(int, deadlock_detector.ThreadEdge)], cycle2: [(int, deadlock_detector.ThreadEdge)]):
+    def cycle_eq(cycle1: [deadlock_detector.ThreadInfo], cycle2: [deadlock_detector.ThreadInfo]):
         if len(cycle1) == 0 and len(cycle2) == 0:
             return True
         print()
         if len(cycle1) != len(cycle2):
             return False
-        return cycle1 == GraphTesting.shift_cycle(cycle2, cycle1[0][0])
+        return cycle1 == GraphTesting.shift_cycle(cycle2, cycle1[0].thread_id)
 
 
 class MySetUpTestCase(unittest.TestCase):

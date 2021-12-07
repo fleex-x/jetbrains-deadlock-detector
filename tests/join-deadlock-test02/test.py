@@ -11,11 +11,12 @@ class TestSmallJoinDeadlockClang(test_tools.MySetUpTestCase):
         error = self.launch_process()
         self.continue_to_threads_beginning(1)
         self.continue_process_n_sec(1)
-        has_deadlock, deadlock_cycle = deadlock_detector.find_deadlock(self.debugger)
+        has_deadlock, deadlock_cycle = deadlock_detector.LockDetector(self.debugger).find_deadlock()
         self.assertTrue(has_deadlock)
+
         deadlock_cycle = test_tools.GraphTesting.shift_cycle(deadlock_cycle, 1)
-        deadlock_node_cycle = [x[0] for x in deadlock_cycle]
-        locks_causes = [x[1].locking_reason.lock_type for x in deadlock_cycle]
+        deadlock_node_cycle = [x.thread_id for x in deadlock_cycle]
+        locks_causes = [x.locking_reason.lock_type for x in deadlock_cycle]
         self.assertTrue(deadlock_node_cycle == [1, 2])
         self.assertTrue(locks_causes == [deadlock_detector.LockType.ThreadLockedByJoin, deadlock_detector.LockType.ThreadLockedByMutex])
 
@@ -28,10 +29,11 @@ class TestSmallJoinDeadlockCcc(test_tools.MySetUpTestCase):
         error = self.launch_process()
         self.continue_to_threads_beginning(1)
         self.continue_process_n_sec(1)
-        has_deadlock, deadlock_cycle = deadlock_detector.find_deadlock(self.debugger)
+        has_deadlock, deadlock_cycle = deadlock_detector.LockDetector(self.debugger).find_deadlock()
         self.assertTrue(has_deadlock)
+
         deadlock_cycle = test_tools.GraphTesting.shift_cycle(deadlock_cycle, 1)
-        deadlock_node_cycle = [x[0] for x in deadlock_cycle]
-        locks_causes = [x[1].locking_reason.lock_type for x in deadlock_cycle]
+        deadlock_node_cycle = [x.thread_id for x in deadlock_cycle]
+        locks_causes = [x.locking_reason.lock_type for x in deadlock_cycle]
         self.assertTrue(deadlock_node_cycle == [1, 2])
         self.assertTrue(locks_causes == [deadlock_detector.LockType.ThreadLockedByJoin, deadlock_detector.LockType.ThreadLockedByMutex])

@@ -1,6 +1,6 @@
 import lldb
 from typing import Optional
-from threadgraph import (ThreadGraph, ThreadEdge, LockingReason, LockType, lock_type_to_str)
+from threadgraph import (ThreadGraph, ThreadInfo, LockingReason, LockType, lock_type_to_str)
 import assemblytemplates
 
 
@@ -33,250 +33,180 @@ def get_bytes_from_data(data: lldb.SBData) -> [int]:
     return res
 
 
-def disassemble_into_bytes(frame: lldb.SBFrame, target: lldb.SBTarget) -> [int]:
-    res: [int]
-    res = []
-    for instruction in frame.GetFunction().GetInstructions(target):
-        instruction: lldb.SBInstruction
-        res.append(get_bytes_from_data(instruction.GetData(target)))
-    return res
+def get_assembly_templates(lock_type: LockType) -> []:
+        assembly_templates = [(LockType.ThreadLockedByMutex,             [assemblytemplates.__lll_lock_wait_binary_instructions_template(),
+                                                                          assemblytemplates.__GI___pthread_mutex_lock_binary_instructions_template()]),
+                              (LockType.ThreadLockedByJoin,              [assemblytemplates.__pthread_clockjoin_ex_binary_instructions_template()]),
+                              (LockType.ThreadLockedBySharedMutexWriter, [assemblytemplates.__GI___pthread_rwlock_wrlock_instructions_template()]),
+                              (LockType.ThreadLockedBySharedMutexReader, [assemblytemplates.__GI___pthread_rwlock_rdlock_instructions_template()])]
+        for lock_type_, templates in assembly_templates:
+            if lock_type_ == lock_type:
+                return templates
 
 
-def get_prev_instruction(frame: lldb.SBFrame, instruction_addr: int, target: lldb.SBTarget) -> Optional[lldb.SBInstruction]:
-    prev = None
-    for instruction in frame.GetFunction().GetInstructions(target):
-        if instruction.GetAddress().GetLoadAddress(target) == instruction_addr:
-            return prev
-        prev = instruction
-    return None
-
-
-def after_syscall(frame: lldb.SBFrame, target: lldb.SBTarget) -> bool:
-    current_instruction_addr = frame.addr.GetLoadAddress(target)
-    prev_instruction = get_prev_instruction(frame, current_instruction_addr, target)
-    if not prev_instruction:
-        return False
-    return prev_instruction.GetMnemonic(target) == "syscall"
-
-
-def is_last_two_frames_blocking_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> bool:
-    frames = thread.get_thread_frames()
-    if len(frames) < 2:
-        return False
-    return (TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[0], target),
-                                                   assemblytemplates.__lll_lock_wait_binary_instructions_template()) and
-            TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[1], target),
-                                                   assemblytemplates.__GI___pthread_mutex_lock_binary_instructions_template()))
-
-
-def detect_pending_mutex(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, int):
-    """
-    :param thread: Current thread
-    :param target: Current target
-    :return: The mutex that is locking the thread (its address and owner)
-    """
-
-    if not is_last_two_frames_blocking_mutex(thread, target):
-        return None
-    current_frame: lldb.SBFrame
-    current_frame = thread.get_thread_frames()[0]
-    if not after_syscall(current_frame, target):
-        return None
-    mutex_addr = current_frame.FindRegister("rdi").GetValueAsUnsigned()
-    error = lldb.SBError()
-    int_size = 4
-    unsigned_int_size = 4
-    mutex_owner = target.GetProcess().ReadUnsignedFromMemory(mutex_addr + int_size + unsigned_int_size, int_size, error)
-    return mutex_addr, mutex_owner
-
-
-def is_last_frame_join(thread: lldb.SBThread, target: lldb.SBTarget) -> bool:
-    frames = thread.get_thread_frames()
-    if len(frames) < 1:
-        return False
-    return (TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[0], target),
-                                                   assemblytemplates.__pthread_clockjoin_ex_binary_instructions_template()))
-
-
-def detect_current_join(thread: lldb.SBThread, target: lldb.SBTarget) -> Optional[int]:
-    """
-    :param thread: Current thread
-    :param target: Current target
-    :return: The thread id that is now joining
-    """
-    if not is_last_frame_join(thread, target):
-        return None
-    current_frame: lldb.SBFrame
-    current_frame = thread.get_thread_frames()[0]
-    if not after_syscall(current_frame, target):
-        return None
-    error = lldb.SBError()
-    unsigned_int_size = 4
-    thread_id_addr = current_frame.FindRegister("rdi").GetValueAsUnsigned()
-    thread_id = target.GetProcess().ReadUnsignedFromMemory(thread_id_addr, unsigned_int_size, error)
-    return thread_id
-
-
-def is_last_frame_locking_shared_mutex_reader(thread: lldb.SBThread, target: lldb.SBTarget) -> bool:
-    frames = thread.get_thread_frames()
-    if len(frames) < 1:
-        return False
-    return (TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[0], target),
-                                                   assemblytemplates.__GI___pthread_rwlock_rdlock_instructions_template()))
-
-
-def detect_pending_shared_mutex_reader(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, int):
-    """
-    :param thread: Current thread
-    :param target: Current target
-    :return: The shared mutex that is locking the thread by writing (its address and owner)
-    """
-    if not is_last_frame_locking_shared_mutex_reader(thread, target):
-        return None
-    current_frame: lldb.SBFrame
-    current_frame = thread.get_thread_frames()[0]
-    if not after_syscall(current_frame, target):
-        return None
-    int_size = 4
-    unsigned_int_size = 4
-    mutex_addr = current_frame.FindRegister("rdi").GetValueAsUnsigned() - unsigned_int_size * 2
-    error = lldb.SBError()
-    mutex_owner = target.GetProcess().ReadUnsignedFromMemory(mutex_addr + 6 * unsigned_int_size, int_size, error)
-    # If the mutex cannot get read access, then it now has a single writing thread (mutex_owner is a writer)
-    return mutex_addr, mutex_owner
-
-
-def is_last_frame_locking_shared_mutex_writer(thread: lldb.SBThread, target: lldb.SBTarget) -> bool:
-    frames = thread.get_thread_frames()
-    if len(frames) < 1:
-        return False
-    return (TemplateChecker.is_matched_by_template(disassemble_into_bytes(frames[0], target),
-                                                   assemblytemplates.__GI___pthread_rwlock_wrlock_instructions_template()))
-
-
-def detect_pending_shared_mutex_writer(thread: lldb.SBThread, target: lldb.SBTarget) -> (int, int):
-    """
-    :param thread: Current thread
-    :param target: Current target
-    :return: The shared mutex that is locking the thread by writing (its address and owner)
-    """
-    if not is_last_frame_locking_shared_mutex_writer(thread, target):
-        return None
-
-    current_frame: lldb.SBFrame
-    current_frame = thread.get_thread_frames()[0]
-    if not after_syscall(current_frame, target):
-        return None
-
-    int_size = 4
-    unsigned_int_size = 4
-    mutex_addr = current_frame.FindRegister("rdi").GetValueAsUnsigned() - unsigned_int_size * 3
-
-    error = lldb.SBError()
-    is_shared = target.GetProcess().ReadUnsignedFromMemory(mutex_addr + 7 * unsigned_int_size, int_size, error)
-
-    if is_shared != 0:
-        return mutex_addr, None
-
-    mutex_owner = target.GetProcess().ReadUnsignedFromMemory(mutex_addr + 6 * unsigned_int_size, int_size, error)
-    return mutex_addr, mutex_owner
-
-
-def detect_current_lock(thread: lldb.SBThread, target: lldb.SBTarget) -> Optional[ThreadEdge]:
-
+class LockDetector:
+    debugger: lldb.SBDebugger
     process: lldb.SBProcess
-    process = target.GetProcess()
-
-    mutex_info = detect_pending_mutex(thread, target)
-    if mutex_info:
-        mutex_addr, mutex_owner = mutex_info
-        mutex_owner = process.GetThreadByID(mutex_owner).GetIndexID()
-        return ThreadEdge(mutex_owner, LockingReason(LockType.ThreadLockedByMutex, mutex_addr))
-
-    joining_thread = detect_current_join(thread, target)
-    if joining_thread:
-        joining_thread = process.GetThreadByID(joining_thread).GetIndexID()
-        return ThreadEdge(joining_thread, LockingReason(LockType.ThreadLockedByJoin, None))
-
-    shared_mutex_reader_info = detect_pending_shared_mutex_reader(thread, target)
-    if shared_mutex_reader_info:
-        mutex_addr, mutex_owner = shared_mutex_reader_info
-        mutex_owner = process.GetThreadByID(mutex_owner).GetIndexID()
-        return ThreadEdge(mutex_owner, LockingReason(LockType.ThreadLockedBySharedMutexReader, mutex_addr))
-
-    shared_mutex_writer_info = detect_pending_shared_mutex_writer(thread, target)
-    if shared_mutex_writer_info:
-        mutex_addr, mutex_owner = shared_mutex_writer_info
-        if mutex_owner:
-            mutex_owner = process.GetThreadByID(mutex_owner).GetIndexID()
-            return ThreadEdge(mutex_owner, LockingReason(LockType.ThreadLockedBySharedMutexWriter, mutex_addr))
-        else:
-            return ThreadEdge(None, LockingReason(LockType.ThreadLockedBySharedMutexWriter, mutex_addr))
-    return None
-
-
-def find_deadlock(debugger: lldb.SBDebugger) -> (bool, [(int, ThreadEdge)]):
     target: lldb.SBTarget
-    target = debugger.GetSelectedTarget()
 
-    process: lldb.SBProcess
-    process = target.GetProcess()
+    def __init__(self, debugger: lldb.SBDebugger) -> None:
+        self.debugger = debugger
+        self.target = debugger.GetSelectedTarget()
+        self.process = self.target.GetProcess()
 
-    g: ThreadGraph
-    g = ThreadGraph()
-    for thread in process:
-        thread: lldb.SBThread
-        thread_edge = detect_current_lock(thread, target)
-        if thread_edge and thread_edge.locking_thread:
-            g.add_edge(thread.GetIndexID(), thread_edge)
-    return g.find_cycle()
+    def disassemble_into_bytes(self, function: lldb.SBFunction) -> [int]:
+        res: [int] = []
+        for instruction in function.GetInstructions(self.target):
+            instruction: lldb.SBInstruction
+            res.append(get_bytes_from_data(instruction.GetData(self.target)))
+        return res
+
+    def is_last_frames_matched_by_templates(self, thread: lldb.SBThread, templates: []) -> bool:
+        if len(thread.get_thread_frames()) < len(templates):
+            return False
+        for i in range(len(templates)):
+            current_frame: lldb.SBFrame = thread.get_thread_frames()[i]
+            if not TemplateChecker.is_matched_by_template(self.disassemble_into_bytes(current_frame.GetFunction()), templates[i]):
+                return False
+        return True
+
+    def get_prev_instruction(self, frame: lldb.SBFrame, instruction_addr: int) -> Optional[lldb.SBInstruction]:
+        prev = None
+        for instruction in frame.GetFunction().GetInstructions(self.target):
+            if instruction.GetAddress().GetLoadAddress(self.target) == instruction_addr:
+                return prev
+            prev = instruction
+        return None
+
+    def after_syscall(self, frame: lldb.SBFrame) -> bool:
+        current_instruction_addr = frame.addr.GetLoadAddress(self.target)
+        prev_instruction = self.get_prev_instruction(frame, current_instruction_addr)
+        if not prev_instruction:
+            return False
+        return prev_instruction.GetMnemonic(self.target) == "syscall"
+
+    def get_thread_index_id(self, thread_id: int) -> int:
+        tt: lldb.SBThread = self.process.GetThreadByID(thread_id)
+        return tt.GetIndexID()
+
+    def get_locking_reason(self, thread: lldb.SBThread, lock_type: LockType) -> Optional[LockingReason]:
+        if not self.is_last_frames_matched_by_templates(thread, get_assembly_templates(lock_type)):
+            return None
+        if not self.after_syscall(thread.get_thread_frames()[0]):
+            return None
+
+        current_frame = thread.get_thread_frames()[0]
+        error = lldb.SBError()
+        int_size = 4
+        unsigned_int_size = 4
+
+        if lock_type == LockType.ThreadLockedByMutex:
+            mutex_addr = current_frame.FindRegister("rdi").GetValueAsUnsigned()
+            mutex_owner = self.target.GetProcess().ReadUnsignedFromMemory(mutex_addr + int_size + unsigned_int_size, int_size, error)
+            assert error.Success()
+
+            mutex_owner = self.get_thread_index_id(mutex_owner)
+            return LockingReason(lock_type, mutex_addr, mutex_owner)
+
+        if lock_type == LockType.ThreadLockedByJoin:
+            locking_thread_id_addr: int = current_frame.FindRegister("rdi").GetValueAsUnsigned()
+            locking_thread_id: int = self.target.GetProcess().ReadUnsignedFromMemory(locking_thread_id_addr, unsigned_int_size, error)
+            assert error.Success()
+
+            locking_thread_id = self.get_thread_index_id(locking_thread_id)
+            return LockingReason(lock_type, None, locking_thread_id)
+
+        if lock_type == LockType.ThreadLockedBySharedMutexReader:
+            mutex_addr = current_frame.FindRegister("rdi").GetValueAsUnsigned() - unsigned_int_size * 2
+            mutex_writer = self.target.GetProcess().ReadUnsignedFromMemory(mutex_addr + 6 * unsigned_int_size, int_size, error)
+            assert error.Success()
+
+            mutex_writer = self.get_thread_index_id(mutex_writer)
+            # If the mutex cannot get read access, then it now has a single writing thread (mutex_writer)
+            return LockingReason(lock_type, mutex_addr, mutex_writer)
+
+        if lock_type == LockType.ThreadLockedBySharedMutexWriter:
+            mutex_addr = current_frame.FindRegister("rdi").GetValueAsUnsigned() - unsigned_int_size * 3
+            is_shared = self.target.GetProcess().ReadUnsignedFromMemory(mutex_addr + 7 * unsigned_int_size, int_size, error)
+            assert error.Success()
+            if is_shared != 0:
+                return LockingReason(lock_type, mutex_addr, None)
+            mutex_writer = self.target.GetProcess().ReadUnsignedFromMemory(mutex_addr + 6 * unsigned_int_size, int_size, error)
+            assert error.Success()
+
+            mutex_writer = self.get_thread_index_id(mutex_writer)
+            return LockingReason(lock_type, mutex_addr, mutex_writer)
+
+    def get_thread_info(self, thread: lldb.SBThread) -> Optional[ThreadInfo]:
+        thread_id: int = thread.GetIndexID()
+        locking_reason: LockingReason
+
+        locking_reason = self.get_locking_reason(thread, LockType.ThreadLockedByMutex)
+        if locking_reason:
+            return ThreadInfo(thread_id, locking_reason)
+
+        locking_reason = self.get_locking_reason(thread, LockType.ThreadLockedByJoin)
+        if locking_reason:
+            return ThreadInfo(thread_id, locking_reason)
+
+        locking_reason = self.get_locking_reason(thread, LockType.ThreadLockedBySharedMutexReader)
+        if locking_reason:
+            return ThreadInfo(thread_id, locking_reason)
+
+        locking_reason = self.get_locking_reason(thread, LockType.ThreadLockedBySharedMutexWriter)
+        if locking_reason:
+            return ThreadInfo(thread_id, locking_reason)
+
+        return None
+
+    def get_locked_threads_info(self) -> [ThreadInfo]:
+        res: [ThreadInfo] = []
+        for thread in self.process:
+            info = self.get_thread_info(thread)
+            if info:
+                res.append(info)
+        return res
+
+    def find_deadlock(self) -> (bool, [ThreadInfo]):
+        g: ThreadGraph
+        g = ThreadGraph()
+        for thread_info in self.get_locked_threads_info():
+            if thread_info.locking_reason.locking_thread:
+                g.add_thread(thread_info)
+        return g.find_cycle()
 
 
 def find_deadlock_console(debugger: lldb.SBDebugger, command: str, result: lldb.SBCommandReturnObject,
                           internal_dict: dict) -> None:
-    has_deadlock, cycle = find_deadlock(debugger)
+    lock_detector: LockDetector = LockDetector(debugger)
+    has_deadlock, cycle = lock_detector.find_deadlock()
+    cycle: [ThreadInfo]
     if has_deadlock:
         result.AppendMessage("deadlock detected:")
-        for node, edge in cycle:
-            edge: ThreadEdge
-            msg = "thread " + str(node) + " is waiting for thread " + str(edge.locking_thread)
-            msg += ": cause is " + lock_type_to_str(edge.locking_reason.lock_type)
-            if edge.locking_reason.synchronizer_addr:
-                msg += " with address " + hex(edge.locking_reason.synchronizer_addr)
+        for thread_info in cycle:
+            thread_info: ThreadInfo
+            msg = "thread " + str(thread_info.thread_id) + " is waiting for thread " + str(thread_info.locking_reason.locking_thread)
+            msg += ": cause is " + lock_type_to_str(thread_info.locking_reason.lock_type)
+            if thread_info.locking_reason.synchronizer_addr:
+                msg += " with address " + hex(thread_info.locking_reason.synchronizer_addr)
             result.AppendMessage(msg)
     else:
         result.AppendMessage("no deadlocks found")
 
 
-def find_locking_reasons(debugger: lldb.SBDebugger) -> [(int, ThreadEdge)]:
-    target: lldb.SBTarget
-    target = debugger.GetSelectedTarget()
-
-    process: lldb.SBProcess
-    process = target.GetProcess()
-
-    res = []
-    for thread in process:
-        thread: lldb.SBThread
-        thread_edge = detect_current_lock(thread, target)
-        if thread_edge:
-            res.append((thread.GetIndexID(), thread_edge))
-    return res
-
-
 def find_locking_reasons_console(debugger: lldb.SBDebugger, command: str, result: lldb.SBCommandReturnObject,
                           internal_dict: dict) -> None:
-    reasons = find_locking_reasons(debugger)
+    lock_detector: LockDetector = LockDetector(debugger)
+    reasons = lock_detector.get_locked_threads_info()
     result.AppendMessage("locking reasons: ")
-    for thread, thread_edge in reasons:
-        thread: int
-        thread_edge: ThreadEdge
-        msg = "Thread " + str(thread) + " is locked because of " + lock_type_to_str(thread_edge.locking_reason.lock_type)
-        if thread_edge.locking_reason.synchronizer_addr:
-            msg += " with address " + hex(thread_edge.locking_reason.synchronizer_addr)
+    for thread_info in reasons:
+        thread_info: ThreadInfo
+        msg = "Thread " + str(thread_info.thread_id) + " is locked because of " + lock_type_to_str(thread_info.locking_reason.lock_type)
+        if thread_info.locking_reason.synchronizer_addr:
+            msg += " with address " + hex(thread_info.locking_reason.synchronizer_addr)
         msg += ". "
-        if thread_edge.locking_thread:
-            msg += "This thread is waiting for thread " + str(thread_edge.locking_thread) + "."
+        if thread_info.locking_reason.locking_thread:
+            msg += "This thread is waiting for thread " + str(thread_info.locking_reason.locking_thread) + "."
         result.AppendMessage(msg)
 
 

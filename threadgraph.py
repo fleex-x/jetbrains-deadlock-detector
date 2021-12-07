@@ -27,26 +27,28 @@ def lock_type_to_str(lock_type: LockType):
 
 class LockingReason:
     lock_type: LockType
+    locking_thread: Optional[int]     # sometimes it is not possible to detect locking thread
     synchronizer_addr: Optional[int]  # synchronizer is usually a mutex
 
-    def __init__(self, lock_type: LockType, synchronizer_addr: Optional[int]):
+    def __init__(self, lock_type: LockType, synchronizer_addr: Optional[int], locking_thread: Optional[int]):
         self.lock_type = lock_type
+        self.locking_thread = locking_thread
         self.synchronizer_addr = synchronizer_addr
 
     def __eq__(self, other):
-        return self.lock_type == other.lock_type and self.synchronizer_addr == other.synchronizer_addr
+        return self.lock_type == other.lock_type and self.synchronizer_addr == other.synchronizer_addr and self.locking_thread == other.locking_thread
 
 
-class ThreadEdge:
-    locking_thread: int
+class ThreadInfo:
+    thread_id: int
     locking_reason: LockingReason
 
-    def __init__(self, locking_thread: int, lock_cause: LockingReason):
-        self.locking_thread = locking_thread
-        self.locking_reason = lock_cause
+    def __init__(self, thread_id: int, locking_reason: LockingReason):
+        self.thread_id = thread_id
+        self.locking_reason = locking_reason
 
     def __eq__(self, other):
-        return self.locking_reason == other.locking_reason and self.locking_thread == other.locking_thread
+        return self.thread_id == other.thread_id and self.locking_reason == other.locking_reason
 
 
 class BoolRef:
@@ -60,13 +62,13 @@ class ThreadGraph:
     def __init__(self):
         self.thread_graph = dict()
 
-    def add_edge(self, locked_thread: int, edge: ThreadEdge):
-        if locked_thread in self.thread_graph:
-            self.thread_graph[locked_thread].append(edge)
+    def add_thread(self, thread: ThreadInfo):
+        if thread.thread_id in self.thread_graph:
+            self.thread_graph[thread.thread_id].append(thread.locking_reason)
         else:
-            self.thread_graph[locked_thread] = [edge]
+            self.thread_graph[thread.thread_id] = [thread.locking_reason]
 
-    def cycle_search(self, current_thread: int, used_states: dict) -> (bool, BoolRef, int, [(int, ThreadEdge)]):
+    def cycle_search(self, current_thread: int, used_states: dict) -> (bool, BoolRef, int, [ThreadInfo]):
         if not (current_thread in self.thread_graph):
             return False, BoolRef(False), 0, []
 
@@ -76,12 +78,12 @@ class ThreadGraph:
         used_states[current_thread] = UsedState.StillInState
 
         for edge in self.thread_graph[current_thread]:
-            edge: ThreadEdge
+            edge: LockingReason
             next_thread = edge.locking_thread
             was_cycle, collected_all_cycle, first_node_in_cycle, cycle = self.cycle_search(next_thread, used_states)
             if was_cycle:
                 if not collected_all_cycle.val:
-                    cycle.append((current_thread, edge))
+                    cycle.append(ThreadInfo(current_thread, edge))
                 if current_thread == first_node_in_cycle:
                     collected_all_cycle.val = True
                 return was_cycle, collected_all_cycle, first_node_in_cycle, cycle
@@ -89,7 +91,7 @@ class ThreadGraph:
         used_states[current_thread] = UsedState.AlreadyGone
         return False, BoolRef(False), 0, []
 
-    def find_cycle(self) -> (bool, [(int, ThreadEdge)]):
+    def find_cycle(self) -> (bool, [ThreadInfo]):
         used_states = dict()
         for thread in self.thread_graph.keys():
             if not (thread in used_states):

@@ -11,9 +11,9 @@ class TestBigDeadlockClang(test_tools.MySetUpTestCase):
         error = self.launch_process()
         self.continue_to_threads_beginning(7)
         self.continue_process_n_sec(1)
-        has_deadlock, deadlock_cycle = deadlock_detector.find_deadlock(self.debugger)
+        has_deadlock, deadlock_cycle = deadlock_detector.LockDetector(self.debugger).find_deadlock()
         self.assertTrue(has_deadlock)
-        deadlock_node_cycle = [x[0] for x in test_tools.GraphTesting.shift_cycle(deadlock_cycle, 2)]
+        deadlock_node_cycle = [x.thread_id for x in test_tools.GraphTesting.shift_cycle(deadlock_cycle, 2)]
         self.assertTrue(deadlock_node_cycle == [2, 3, 4, 5, 6, 7, 8])
 
 
@@ -25,9 +25,9 @@ class TestBigDeadlockGcc(test_tools.MySetUpTestCase):
         error = self.launch_process()
         self.continue_to_threads_beginning(7)
         self.continue_process_n_sec(1)
-        has_deadlock, deadlock_cycle = deadlock_detector.find_deadlock(self.debugger)
+        has_deadlock, deadlock_cycle = deadlock_detector.LockDetector(self.debugger).find_deadlock()
         self.assertTrue(has_deadlock)
-        deadlock_node_cycle = [x[0] for x in test_tools.GraphTesting.shift_cycle(deadlock_cycle, 2)]
+        deadlock_node_cycle = [x.thread_id for x in test_tools.GraphTesting.shift_cycle(deadlock_cycle, 2)]
         self.assertTrue(deadlock_node_cycle == [2, 3, 4, 5, 6, 7, 8])
 
 
