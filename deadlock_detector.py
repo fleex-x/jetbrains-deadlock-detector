@@ -1,3 +1,5 @@
+import json
+
 import lldb
 from typing import Optional
 from threadgraph import (ThreadGraph, ThreadInfo, LockingReason, LockType, lock_type_to_str)
@@ -181,17 +183,22 @@ def find_deadlock_console(debugger: lldb.SBDebugger, command: str, result: lldb.
     lock_detector: LockDetector = LockDetector(debugger)
     has_deadlock, cycle = lock_detector.find_deadlock()
     cycle: [ThreadInfo]
-    if has_deadlock:
-        result.AppendMessage("deadlock detected:")
-        for thread_info in cycle:
-            thread_info: ThreadInfo
-            msg = "thread " + str(thread_info.thread_id) + " is waiting for thread " + str(thread_info.locking_reason.locking_thread)
-            msg += ": cause is " + lock_type_to_str(thread_info.locking_reason.lock_type)
-            if thread_info.locking_reason.synchronizer_addr:
-                msg += " with address " + hex(thread_info.locking_reason.synchronizer_addr)
-            result.AppendMessage(msg)
+    if "--json" not in command:
+        if has_deadlock:
+            result.AppendMessage("deadlock detected:")
+            for thread_info in cycle:
+                thread_info: ThreadInfo
+                msg = "thread " + str(thread_info.thread_id) + " is waiting for thread " + str(thread_info.locking_reason.locking_thread)
+                msg += ": cause is " + lock_type_to_str(thread_info.locking_reason.lock_type)
+                if thread_info.locking_reason.synchronizer_addr:
+                    msg += " with address " + hex(thread_info.locking_reason.synchronizer_addr)
+                result.AppendMessage(msg)
+        else:
+            result.AppendMessage("no deadlocks found")
     else:
-        result.AppendMessage("no deadlocks found")
+        if has_deadlock:
+            result.AppendMessage(json.dumps(list(map(lambda thread: thread.to_dict(), cycle)), sort_keys=True, indent=4))
+            # result.AppendMessage(json.)
 
 
 def find_locking_reasons_console(debugger: lldb.SBDebugger, command: str, result: lldb.SBCommandReturnObject,
@@ -199,15 +206,18 @@ def find_locking_reasons_console(debugger: lldb.SBDebugger, command: str, result
     lock_detector: LockDetector = LockDetector(debugger)
     reasons = lock_detector.get_locked_threads_info()
     result.AppendMessage("locking reasons: ")
-    for thread_info in reasons:
-        thread_info: ThreadInfo
-        msg = "Thread " + str(thread_info.thread_id) + " is locked because of " + lock_type_to_str(thread_info.locking_reason.lock_type)
-        if thread_info.locking_reason.synchronizer_addr:
-            msg += " with address " + hex(thread_info.locking_reason.synchronizer_addr)
-        msg += ". "
-        if thread_info.locking_reason.locking_thread:
-            msg += "This thread is waiting for thread " + str(thread_info.locking_reason.locking_thread) + "."
-        result.AppendMessage(msg)
+    if "--json" not in command:
+        for thread_info in reasons:
+            thread_info: ThreadInfo
+            msg = "Thread " + str(thread_info.thread_id) + " is locked because of " + lock_type_to_str(thread_info.locking_reason.lock_type)
+            if thread_info.locking_reason.synchronizer_addr:
+                msg += " with address " + hex(thread_info.locking_reason.synchronizer_addr)
+            msg += ". "
+            if thread_info.locking_reason.locking_thread:
+                msg += "This thread is waiting for thread " + str(thread_info.locking_reason.locking_thread) + "."
+            result.AppendMessage(msg)
+    else:
+        result.AppendMessage(json.dumps(list(map(lambda thread: thread.to_dict(), reasons)), sort_keys=True, indent=4))
 
 
 def print_frames(debugger: lldb.SBDebugger) -> None:

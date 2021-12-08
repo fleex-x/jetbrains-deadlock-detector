@@ -1,5 +1,6 @@
 from typing import Optional
 from enum import Enum
+import json
 
 
 class UsedState(Enum):
@@ -25,9 +26,20 @@ def lock_type_to_str(lock_type: LockType):
         return "shared mutex writer"
 
 
+def lock_type_for_json(lock_type: LockType):
+    if lock_type == LockType.ThreadLockedByMutex:
+        return "ThreadLockedByMutex"
+    if lock_type == LockType.ThreadLockedByJoin:
+        return "ThreadLockedByJoin"
+    if lock_type == LockType.ThreadLockedBySharedMutexReader:
+        return "ThreadLockedBySharedMutexReader"
+    if lock_type == LockType.ThreadLockedBySharedMutexWriter:
+        return "ThreadLockedBySharedMutexWriter"
+
+
 class LockingReason:
     lock_type: LockType
-    locking_thread: Optional[int]     # sometimes it is not possible to detect locking thread
+    locking_thread: Optional[int]  # sometimes it is not possible to detect locking thread
     synchronizer_addr: Optional[int]  # synchronizer is usually a mutex
 
     def __init__(self, lock_type: LockType, synchronizer_addr: Optional[int], locking_thread: Optional[int]):
@@ -42,6 +54,24 @@ class LockingReason:
 class ThreadInfo:
     thread_id: int
     locking_reason: LockingReason
+
+    def to_dict(self):
+        json_form = {
+            'thread_id': self.thread_id,
+            'lock_type': lock_type_for_json(self.locking_reason.lock_type),
+            'locking_thread': self.locking_reason.locking_thread,
+            'synchronizer_addr': self.locking_reason.synchronizer_addr
+        }
+        return json_form
+
+    def to_json(self):
+        json_form = {
+            'thread_id': self.thread_id,
+            'lock_type': lock_type_for_json(self.locking_reason.lock_type),
+            'locking_thread': self.locking_reason.locking_thread,
+            'synchronizer_addr': self.locking_reason.synchronizer_addr
+        }
+        return json.dumps(json_form, sort_keys=True, indent=4)
 
     def __init__(self, thread_id: int, locking_reason: LockingReason):
         self.thread_id = thread_id
